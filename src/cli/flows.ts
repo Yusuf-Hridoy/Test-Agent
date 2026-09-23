@@ -161,6 +161,13 @@ export async function flowsDeleteCommand(
   try {
     const flow = requireFlow(db, slug);
     if (!opts.yes) {
+      // A prompt with nobody there hangs forever. In a script or a CI job that
+      // is worse than an error, because it looks like the job is still working.
+      if (!input.isTTY) {
+        throw new ConfigError(
+          `Refusing to prompt: there is no terminal attached.\nRe-run with --yes to delete "${slug}" non-interactively.`,
+        );
+      }
       const rl = readline.createInterface({ input, output });
       try {
         const answer = (
