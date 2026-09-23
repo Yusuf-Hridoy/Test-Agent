@@ -65,9 +65,13 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
   // Everything that leaves this function — terminal, JSON, report — goes through
   // the redactor, because notes and findings are written by the model.
   const narrate = (line: string) => (opts.narrate ?? (() => {}))(secrets.redact(line));
-  const observe = (type: string, detail: string) =>
-    observations.push({ type, detail: secrets.redact(detail) });
-  const observations: { type: string; detail: string }[] = [];
+  const observe = (type: string, detail: string, pageKey?: string) =>
+    observations.push({
+      type,
+      detail: secrets.redact(detail),
+      ...(pageKey ? { pageKey } : {}),
+    });
+  const observations: { type: string; detail: string; pageKey?: string }[] = [];
   const usage = new UsageTracker();
   const budget = new Budget(cfg, usage, startedAt.getTime());
   const stepLog = new StepLog(path.join(reportDir, "steps.jsonl"), secrets);
@@ -463,7 +467,13 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
         const outcome = await slowGrace(run, cfg.run.slow_network_grace_ms, label);
         const result = outcome.result;
         if (outcome.observation) {
-          observe(outcome.observation.type, outcome.observation.detail);
+          // Which page was slow matters: the performance oracle counts repeats
+          // per page across sessions, not "something somewhere was slow".
+          observe(
+            outcome.observation.type,
+            outcome.observation.detail,
+            normalizePageKey(acting.snap.url),
+          );
           narrate(`  slow page: ${outcome.observation.detail}`);
         }
 

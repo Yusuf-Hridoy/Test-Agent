@@ -264,3 +264,34 @@ export function recordReplay(
     "UPDATE flows SET last_replay_at = ?, last_replay_result = ?, status = ?, updated_at = ? WHERE id = ?",
   ).run(now, result, status, now, flowId);
 }
+
+/**
+ * The session whose run covers this instant, if any.
+ *
+ * Lets a regression finding cite "last passed during suite #7" without storing
+ * a session id on every replay: a replay that happened inside a suite's window
+ * belongs to that suite, and a standalone `flows replay` belongs to none.
+ */
+export function sessionCoveringTime(db: MemoryDb, iso: string): SessionRow | undefined {
+  return db
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(iso, iso) as SessionRow | undefined;
+}
+
+/** The first sighting of a defect, by fingerprint — undefined if never seen. */
+export function firstFindingByFingerprint(
+  db: MemoryDb,
+  fingerprint: string,
+): (FindingRow & { session_started_at: string | null }) | undefined {
+  return db
+    .prepare(
+      `SELECT f.*, s.started_at AS session_started_at
+       FROM findings f LEFT JOIN sessions s ON s.id = f.session_id
+       WHERE f.fingerprint = ? ORDER BY f.id LIMIT 1`,
+    )
+    .get(fingerprint) as (FindingRow & { session_started_at: string | null }) | undefined;
+}

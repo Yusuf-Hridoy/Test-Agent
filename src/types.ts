@@ -61,7 +61,11 @@ export type Oracle =
   | "http_5xx"
   | "http_4xx_unexpected"
   | "crash"
-  | "llm_judgment";
+  | "llm_judgment"
+  /** A flow that used to pass no longer does (Phase 3). */
+  | "regression"
+  /** The same page has needed extra time to respond across several sessions. */
+  | "performance";
 
 export type Severity = "high" | "medium" | "low";
 
@@ -118,7 +122,8 @@ export interface SessionResult {
   charter: string;
   objectives: Objective[];
   findings: Finding[];
-  observations: { type: string; detail: string }[];
+  /** `pageKey` is set when the observation is about one page (Phase 3 oracles). */
+  observations: { type: string; detail: string; pageKey?: string }[];
   usage: Record<Provider, ProviderUsage>;
   stepCount: number;
   reportDir: string;

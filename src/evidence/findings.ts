@@ -16,10 +16,12 @@ export interface FindingInput {
 
 /**
  * Hard Rule 8: every finding carries the oracle that fired and a confidence.
- * `llm_judgment` is always low-confidence; hard oracles are high.
+ * Hard oracles are high-confidence. `llm_judgment` is always low. `performance`
+ * is low too: "this page was slow three times" is a smell, not a proof — the
+ * machine, the network and the day all get a vote.
  */
 export function confidenceFor(oracle: Oracle): "high" | "low" {
-  return oracle === "llm_judgment" ? "low" : "high";
+  return oracle === "llm_judgment" || oracle === "performance" ? "low" : "high";
 }
 
 export class FindingBuilder {

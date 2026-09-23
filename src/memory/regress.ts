@@ -7,7 +7,15 @@ import { UsageTracker } from "../model/usage.js";
 import type { GenerateFn } from "../model/ask.js";
 import { isoNow, stamp } from "../util.js";
 import { MAGPIE_VERSION } from "../version.js";
-import { listFlows, flowBySlug, type MemoryDb } from "./db.js";
+import {
+  firstFindingByFingerprint,
+  flowBySlug,
+  listFlows,
+  sessionCoveringTime,
+  type MemoryDb,
+} from "./db.js";
+import { fingerprintOf } from "./fingerprint.js";
+import { ingestSuite } from "./ingest.js";
 import { replayFlow, type ReplayResult } from "./replay.js";
 import type { StoredFlow } from "./types.js";
 
@@ -309,6 +317,66 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
           (replay.passed ? "" : ` at step ${replay.failedAt}/${replay.stepsTotal}`),
       );
     }
+    // ---- the regression oracle (§1.4) ----------------------------------
+    // A flow that used to pass and now does not is the memory-based finding
+    // this whole phase exists to make possible.
+    for (const f of flows) {
+      if (f.outcome !== "FAIL") continue;
+      const title = `Flow "${f.slug}" no longer passes`;
+      const pageKey = pageKeyFor(db, f.slug);
+      // Raise it when the flow passed before this run, and keep raising it on
+      // later runs of a flow already known to have regressed. Without the
+      // second clause a nightly suite reports the breakage once and then goes
+      // quiet about it, which is how a broken flow becomes invisible.
+      const prior = firstFindingByFingerprint(db, fingerprintOf(title, pageKey, "regression"));
+      if (!f.lastPassAt && !prior) continue;
+      const lastPass = f.lastPassAt ? sessionCoveringTime(db, f.lastPassAt) : undefined;
+      const since = prior?.session_started_at ?? prior?.created_at;
+      findings.push({
+        id: `R-${String(findings.length + 1).padStart(3, "0")}`,
+        title,
+        severity: "high",
+        oracle: "regression",
+        confidence: "high",
+        flow: f.slug,
+        ...(f.failedAt !== undefined ? { failedAt: f.failedAt } : {}),
+        expected: f.lastPassAt
+          ? `The flow "${f.name}" replays end to end, as it did on ${f.lastPassAt}.`
+          : `The flow "${f.name}" replays end to end. It has been failing since ${since}.`,
+        actual: `Step ${f.failedAt} of ${f.stepsTotal} failed: ${f.reason ?? "no reason recorded"}`,
+        ...(f.lastPassAt ? { lastPassAt: f.lastPassAt } : {}),
+        ...(lastPass ? { lastPassSession: `session ${lastPass.id} (${lastPass.status})` } : {}),
+        // Filled in by ingestion, which knows the project's whole history.
+        status: "NEW",
+        seenCount: 1,
+        ...(f.reportDir ? { reportDir: f.reportDir } : {}),
+      });
+    }
+
+    // Persist the suite so tomorrow's run knows what today already reported.
+    const ingested = ingestSuite(db, {
+      reportDir,
+      startedAt: isoNow(startedAt),
+      endedAt: isoNow(),
+      status: "REGRESSION",
+      charter: `regression: ${opts.requested}`,
+      llmRequests: usage.totalRequests(),
+      findings: findings.map((f) => ({
+        fid: f.id,
+        title: f.title,
+        severity: f.severity,
+        oracle: f.oracle,
+        confidence: f.confidence,
+        pageKey: pageKeyFor(db, f.flow),
+      })),
+    });
+    for (const verdict of ingested.verdicts) {
+      const finding = findings.find((f) => f.id === verdict.fid);
+      if (!finding) continue;
+      finding.status = verdict.status;
+      finding.seenCount = verdict.seenCount;
+      if (verdict.firstSeenAt) finding.firstSeenAt = verdict.firstSeenAt;
+    }
   } finally {
     closeDb(db);
   }
@@ -354,6 +422,13 @@ export class RegressError extends Error {
     super(message);
     this.name = "RegressError";
   }
+}
+
+/** Where a flow's failure lives, for fingerprinting: its last step's page. */
+function pageKeyFor(db: MemoryDb, slug: string): string | null {
+  const flow = flowBySlug(db, slug);
+  if (!flow) return null;
+  return flow.steps.at(-1)?.url_after ?? flow.start_page_key ?? null;
 }
 
 function untested(flow: StoredFlow): SuiteFlowResult {

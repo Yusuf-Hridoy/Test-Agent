@@ -113,10 +113,51 @@ describe("regression suite (P3-T2)", () => {
     expect(byFlow[BROKEN_PAGE]!.reason).toMatch(/draft/);
 
     expect(result.totals).toMatchObject({ total: 3, passed: 1, failed: 1, skipped: 1 });
+    // ADD was verified a moment ago, so its failure is a regression, seen once.
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ oracle: "regression", status: "NEW", seenCount: 1 });
     expect(result.exitCode).toBe(1);
     // Zero model calls for a whole suite — the economic promise of the phase.
     expect(result.healCalls).toBe(0);
     for (const p of PROVIDERS) expect(result.usage[p].requests).toBe(0);
+
+    app.setAddLabel("Add to cart");
+  }, 300_000);
+
+  it("raises a regression finding when a flow that used to pass stops passing", async () => {
+    // ENTER is verified and still works; ADD was verified and is now broken.
+    app.setAddLabel("Put in basket");
+    await replayFlow(flowBySlug(db, ADD)!, { dir, db }); // fail it once more
+    app.setAddLabel("Add to cart");
+    await replayFlow(flowBySlug(db, ADD)!, { dir, db }); // …and back to verified
+    app.setAddLabel("Put in basket");
+
+    const result = await runRegression({ dir, requested: ADD });
+    expect(result.flows[0]!.outcome).toBe("FAIL");
+    expect(result.findings).toHaveLength(1);
+    const finding = result.findings[0]!;
+    expect(finding.oracle).toBe("regression");
+    // The flow failing IS the evidence, so this is not a guess.
+    expect(finding.confidence).toBe("high");
+    expect(finding.severity).toBe("high");
+    expect(finding.flow).toBe(ADD);
+    expect(finding.failedAt).toBe(1);
+    // It cites when the flow last worked — that is what makes it a regression
+    // rather than "this flow is broken".
+    expect(finding.lastPassAt).toBeTruthy();
+    expect(finding.expected).toContain(finding.lastPassAt!);
+    // The mixed suite above already reported this defect once, so tonight's
+    // sighting is not news — that is the whole point of the fingerprint.
+    expect(finding.status).toBe("KNOWN");
+
+    const second = await runRegression({ dir, requested: ADD });
+    expect(second.findings[0]!.status).toBe("KNOWN");
+    expect(second.findings[0]!.seenCount).toBe(finding.seenCount + 1);
+
+    const html = renderSuiteReport(second);
+    expect(html).toContain("Known findings (1)");
+    expect(html).toContain("Nothing new");
+    expect(html).toContain("oracle-regression");
 
     app.setAddLabel("Add to cart");
   }, 300_000);

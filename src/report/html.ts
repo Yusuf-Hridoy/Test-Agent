@@ -141,7 +141,7 @@ function findingCard(f: Finding, result: SessionResult, steps: StepRecord[]): st
   <h3>${escapeHtml(f.id)} — ${escapeHtml(f.title)}</h3>
   <p style="margin:0">
     <span class="chip">severity: ${escapeHtml(f.severity)}</span>
-    <span class="chip">oracle: ${escapeHtml(f.oracle)}</span>
+    <span class="chip oracle-${escapeHtml(f.oracle)}">oracle: ${escapeHtml(f.oracle)}</span>
     <span class="chip">confidence: ${escapeHtml(f.confidence)}</span>
     ${f.objectiveId ? `<span class="chip">${escapeHtml(f.objectiveId)}</span>` : ""}
   </p>

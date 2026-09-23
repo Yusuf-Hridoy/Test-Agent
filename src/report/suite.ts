@@ -128,7 +128,7 @@ function findingCard(f: SuiteFinding): string {
     : "";
   return `<div class="card finding ${escapeHtml(f.severity)}">
 <h3>${escapeHtml(f.id)} — ${escapeHtml(f.title)}</h3>
-<p>${since}<span class="chip">${escapeHtml(f.oracle)}</span><span class="chip">confidence ${escapeHtml(f.confidence)}</span><span class="chip">${escapeHtml(f.severity)}</span></p>
+<p>${since}<span class="chip oracle-${escapeHtml(f.oracle)}">${escapeHtml(f.oracle)}</span><span class="chip">confidence ${escapeHtml(f.confidence)}</span><span class="chip">${escapeHtml(f.severity)}</span></p>
 ${lastPass}
 <div class="grid">
   <div><div class="label">Expected</div><pre>${escapeHtml(f.expected)}</pre></div>
