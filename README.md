@@ -10,10 +10,11 @@ and a Playwright trace.
 
 It runs on **free-tier LLM APIs** (Gemini, Groq, Mistral). No paid key required.
 
-> **Phase 1.** The execution core is complete: `init`, `login`, `run --charter`,
-> budgets, guards, evidence and reports. Persistent memory — the part that makes
-> the name true — lands in Phase 2, which compiles explored flows into
-> deterministic replays that cost nothing to re-run.
+> **Phase 2.** The execution core (`init`, `login`, `run --charter`, budgets,
+> guards, evidence, reports) is complete, and Magpie now **remembers**: every run
+> is folded into a per-project SQLite memory, passed flows compile into
+> deterministic replays that cost **zero model calls**, and later sessions plan
+> against the app map instead of rediscovering it. See [Memory](#memory).
 
 ---
 
@@ -70,7 +71,7 @@ reports/2026-09-16_14-32-05/
   index.html        ← self-contained report; open it offline, mail it, attach it
   steps.jsonl       ← every step, appended as it happened (crash-safe)
   session.json      ← the machine-readable result
-  flows.draft.json  ← seam for Phase-2 replay
+  flows.draft.json  ← the passed objectives, compiled into memory as flows
   trace.zip         ← npx playwright show-trace trace.zip
   shots/            ← numbered screenshots
 ```
@@ -82,9 +83,18 @@ reports/2026-09-16_14-32-05/
 | `magpie init --name <n> --url <u>` | Create a project folder: config, `.env`, `.gitignore`, `.auth/`, `reports/` |
 | `magpie login [--as <name>]` | Open a headed browser, you log in, press Enter; the session is saved to `.auth/<name>.json` |
 | `magpie run --charter "<what to test>" [--as <name>] [--headed]` | Plan and execute a test session, then write the report |
+| `magpie memory show` | Pages, flows and sessions this project remembers |
+| `magpie memory stats` | Database size, totals, schema version |
+| `magpie flows list` | Every remembered flow: status, steps, last replay |
+| `magpie flows show <slug>` | One flow's steps, in the order replay runs them |
+| `magpie flows replay <slug> [--headed] [--as <name>]` | Replay a flow against the live app — **no model calls** |
+| `magpie flows verify <slug>` | Replay, and promote the flow to `verified` if it passes |
+| `magpie flows rename <slug> <new name>` | Give a flow a human name |
+| `magpie flows delete <slug> [-y]` | Forget a flow (its steps go with it) |
 
-Exit codes: `0` a report exists (COMPLETED or BUDGET_EXHAUSTED) · `2` blocked
-(ENVIRONMENT_DOWN, PLAN_FAILED, CRASHED) · `3` auth or config problem.
+Exit codes: `0` a report exists (COMPLETED or BUDGET_EXHAUSTED), or a replay
+passed · `1` a replay **failed** · `2` blocked (ENVIRONMENT_DOWN, PLAN_FAILED,
+CRASHED) · `3` auth or config problem.
 
 ## Configuration (`magpie.config.yaml`)
 
@@ -127,7 +137,7 @@ REASONING  LLM via the Vercel AI SDK — one single-shot call per decision
 HARNESS    deterministic TypeScript — budgets, loop detection, scope guard,
            environment monitor, evidence capture, report
 EXECUTION  Playwright (Chromium) — navigate / observe / act, storageState auth
-MEMORY     Phase 2
+MEMORY     SQLite per project — app map, replayable flows, past findings
 ```
 
 Budgets and safety are never enforced by prompting. The while-loop lives in
@@ -152,11 +162,96 @@ A site that is simply down is never reported as a bug: connection failures, DNS
 errors and mass 5xx pause the session, retry at 30/60/120 s, and finalize as
 `ENVIRONMENT_DOWN` if the app does not come back.
 
+## Memory
+
+Generic browser agents test once and forget. Magpie keeps what it learned in
+`<project>/memory/magpie.db` — one SQLite file per project — and spends model
+tokens only on ground it has not covered.
+
+```bash
+magpie run --charter "Add an item to the cart and check the badge"   # explores, costs tokens
+magpie memory show                                                   # what it learned
+magpie flows replay add-an-item-to-the-cart                          # re-runs it for free
+```
+
+### What is stored
+
+| Table | What it holds |
+|---|---|
+| `pages` | Every page seen, keyed by normalized `host/path`, with visit counts and the last-seen element list |
+| `transitions` | Which action moved the browser from which page to which (`click "Add to cart"`) |
+| `flows` / `flow_steps` | Each passed objective as a replayable step list, targeted by role + accessible name — never by snapshot id, which dies with the session |
+| `findings` | Title, severity, oracle and confidence of every finding, keyed to the page it fired on |
+| `sessions` | One row per run: status, charter, report folder, model requests spent |
+
+Entity ids in URLs collapse to `:id` (`shop.test/item/4711` →
+`shop.test/item/:id`), so the map of a shop with 10 000 products stays the size
+of a shop with one.
+
+### Replay costs nothing
+
+`magpie flows replay <slug>` drives a real Chromium through the recorded steps
+with **no model in the loop** — the usage counter is asserted to be zero, not
+assumed. That is the economic point of the whole tool: explore expensively once,
+then re-run known ground for free as often as you like.
+
+A replay either passes or fails **at an exact step**, with a screenshot, the
+console/network delta and a Playwright trace in
+`reports/<timestamp>-replay-<slug>/`. It never heals itself and never guesses: if
+a step's target matches zero elements — or more than one — that is a failure, not
+an invitation to click something similar. A failed flow is marked `broken`; a
+passing one is `verified`.
+
+| Status | Meaning |
+|---|---|
+| `draft` | Recorded from a passed objective, never replayed |
+| `verified` | A replay passed against the live app |
+| `broken` | A replay failed — the app changed, or the flow was always fragile |
+
+### Later runs plan against it
+
+When a project has memory, the planner is handed a short briefing (~1200 tokens)
+listing the most-visited pages, the verified flows and known high-severity
+findings, with one added rule: extend or vary known ground rather than re-test it
+identically. A project with no memory sends exactly the prompt Phase 1 sent, so a
+first run against a new app is unchanged.
+
+### Secrets are never stored
+
+No credential reaches the database. A value that the redactor masked is stored as
+the literal placeholder `{secret}`, and replay **refuses** to run that step rather
+than invent a value:
+
+```
+FAIL  log-in at step 2/4
+      flow contains a secret value; secrets are never stored — re-record via a charter run
+```
+
+This is rare in practice: authentication comes from the saved `storageState` in
+`.auth/`, not from replaying a typed password.
+
+### Inspecting, sharing and deleting
+
+```bash
+magpie memory show                       # counts, top pages, flows, recent sessions
+magpie memory stats                      # size on disk, schema version, totals
+magpie flows show add-an-item-to-cart    # the exact steps replay will run
+magpie flows delete add-an-item-to-cart  # forget one flow
+rm -rf memory/                           # forget everything; the next run starts fresh
+sqlite3 memory/magpie.db .schema         # it is just SQLite — read it however you like
+```
+
+`magpie init` gitignores `memory/` by default. Committing it is a deliberate
+choice and a reasonable one: it holds no secrets, and checking it in gives your
+team a shared set of replayable flows that arrive with the repository. Delete the
+`memory/` line from the generated `.gitignore` if you want that.
+
 ## Security model
 
 What **never leaves your machine**: your `.env`, your saved sessions in
 `.auth/`, cookies, tokens, `Authorization` headers, and anything you type into a
-password field. Values typed into password inputs are registered as secrets
+password field — including out of `memory/magpie.db`, where a masked value is
+stored as `{secret}` and refuses to replay. Values typed into password inputs are registered as secrets
 *before* they are typed, and every prompt, log line and step record is redacted
 against that set. `magpie login` deliberately discards its Playwright trace so
 your password is never recorded.
@@ -188,6 +283,9 @@ npx tsx scripts/smoke-model.ts <project-dir>   # one live model call, needs a ke
 The integration test in `src/harness/__tests__/session.test.ts` runs the entire
 loop against a local fixture app with a scripted model, so the harness, guards,
 oracles, evidence and report are all covered without spending a token.
+`src/memory/__tests__/replay.test.ts` goes further: it records a flow with a
+scripted model, replays it with none, breaks the fixture app on cue to prove the
+replay fails at the right step, then fixes it and re-verifies.
 
 ## License
 

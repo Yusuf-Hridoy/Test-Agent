@@ -54,6 +54,12 @@ run:
   headed: false
   # Extra grace given to a slow page before a timeout becomes a failure.
   slow_network_grace_ms: 15000
+
+# Memory lives in memory/magpie.db (SQLite): the pages Magpie has seen, the
+# flows it can replay, and past findings. Inspect it with \`magpie memory show\`.
+# No secret is ever written there — a redacted value is stored as "{secret}"
+# and refuses to replay. The generated .gitignore ignores memory/ by default;
+# delete that line to commit it and share remembered flows with your team.
 `;
 }
 
@@ -73,5 +79,9 @@ APP_PASS=
 }
 
 export function gitignoreTemplate(): string {
-  return `.env\n.auth/\nreports/\n`;
+  return (
+    `.env\n.auth/\nreports/\n` +
+    `# Remembered pages and flows. Delete the next line to commit them and\n` +
+    `# share replayable flows with your team — it holds no secrets.\nmemory/\n`
+  );
 }
