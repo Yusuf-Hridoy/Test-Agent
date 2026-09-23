@@ -1,0 +1,44 @@
+import type { SessionResult, Snapshot } from "../types.js";
+import type { SecretStore } from "../model/redact.js";
+import { closeDb, openMemoryDb, type MemoryDb } from "./db.js";
+import { ingestSession } from "./ingest.js";
+
+export interface RecordArgs {
+  dir: string;
+  result: SessionResult;
+  reportDir: string;
+  secrets: SecretStore;
+  snapshots: Map<string, Snapshot>;
+  narrate?: (line: string) => void;
+  observe?: (type: string, detail: string) => void;
+}
+
+/**
+ * Fold a finished session into project memory.
+ *
+ * Deliberately swallows every failure: a corrupt or locked database is a
+ * memory problem, and a session that found real defects must still produce its
+ * report. The failure is recorded as an observation so it shows up in the run
+ * rather than disappearing.
+ */
+export function ingestIntoMemory(args: RecordArgs): void {
+  let db: MemoryDb | undefined;
+  try {
+    db = openMemoryDb(args.dir);
+    const summary = ingestSession(db, args.result, args.reportDir, {
+      secrets: args.secrets,
+      snapshots: args.snapshots,
+    });
+    if (summary.alreadyIngested) return;
+    args.narrate?.(
+      `memory: ${summary.pages} page(s), ${summary.transitions} transition(s), ` +
+        `${summary.flowsCreated.length} new flow(s)` +
+        (summary.flowsSkipped.length ? `, ${summary.flowsSkipped.length} already known` : ""),
+    );
+  } catch (err) {
+    args.observe?.("memory_ingest_failed", `could not write project memory: ${(err as Error).message}`);
+    args.narrate?.(`memory: not updated (${(err as Error).message})`);
+  } finally {
+    closeDb(db);
+  }
+}
