@@ -209,6 +209,6 @@ early, even partially, unless the brief says to leave a seam for them.
 - Live running found and fixed **19 real defects**; PHASE-1-ACCEPTANCE-BRIEF.md carries the per-scenario Run Log with root causes. 141 tests green, build clean.
 - Outstanding, by choice rather than blockage:
   - The literal Wi-Fi-toggle runs of S3/S4 (~5 min by hand) — projects prepared at `test-projects/s3-transient` / `s4-sustained`. The simulation covers the same code paths; the untested delta is the LLM provider being unreachable at the same time, which is covered by `src/harness/__tests__/outage.test.ts` instead.
-  - The repo is not under git, so no per-scenario commits were made and the whole phase is uncommitted.
+  - No per-scenario commits exist: git was initialised after acceptance, so all of Phase 1 landed in a single `first commit`.
 - Model note: `gemini-2.5-flash` is retired for new keys; `gemini-3.6-flash` allows 20 requests/day on the free tier. Pinned default is `gemini-3.1-flash-lite` (tools + vision, ~1.5s, own quota bucket). Groq `openai/gpt-oss-120b` is the verified fallback and has no vision, which exercises the screenshot-degradation path.
 - Known issues: `npm audit` undici advisories via `@ai-sdk/provider-utils` (fix needs ai v6, pinned away by CLAUDE.md §4).
