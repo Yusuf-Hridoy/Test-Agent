@@ -5,7 +5,15 @@ import type { AddressInfo } from "node:net";
  * A three-page shop used by the session integration test. It deliberately
  * misbehaves in two ways: /broken logs a console error, and /api/boom 500s.
  */
-export async function startFakeApp(fixedPort = 0): Promise<{ url: string; close: () => Promise<void> }> {
+export interface FakeApp {
+  url: string;
+  close: () => Promise<void>;
+  /** Rename the add-to-cart button, so a replay can be made to break on cue. */
+  setAddLabel: (label: string) => void;
+}
+
+export async function startFakeApp(fixedPort = 0): Promise<FakeApp> {
+  let addLabel = "Add to cart";
   const page = (body: string) =>
     `<!doctype html><html><head><title>Fixture Shop</title></head><body>${body}</body></html>`;
 
@@ -31,7 +39,7 @@ export async function startFakeApp(fixedPort = 0): Promise<{ url: string; close:
           page(`<h1>Inventory</h1>
             <script>fetch("http://localhost:${port}/api/telemetry").catch(() => {})</script>
             <span id="badge">cart: 0</span>
-            <button id="add" onclick="document.getElementById('badge').textContent='cart: 1'">Add to cart</button>
+            <button id="add" onclick="document.getElementById('badge').textContent='cart: 1'">${addLabel}</button>
             <a href="/broken">Broken page</a>
             <button onclick="fetch('/api/boom')">Check out</button>
             <a href="/logout">Logout</a>`),
@@ -61,5 +69,8 @@ export async function startFakeApp(fixedPort = 0): Promise<{ url: string; close:
   return {
     url: `http://127.0.0.1:${port}`,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    setAddLabel: (label: string) => {
+      addLabel = label;
+    },
   };
 }

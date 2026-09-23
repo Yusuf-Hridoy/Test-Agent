@@ -42,6 +42,19 @@ program
     await runCommand(opts);
   });
 
+const flows = program.command("flows").description("Work with remembered flows");
+
+flows
+  .command("replay <slug>")
+  .description("Replay a remembered flow deterministically — no model calls")
+  .option("--as <name>", "auth profile name", "default")
+  .option("--headed", "show the browser window")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (slug: string, opts: { as?: string; headed?: boolean; dir?: string }) => {
+    const { flowsReplayCommand } = await import("./flows.js");
+    await flowsReplayCommand({ slug, ...opts });
+  });
+
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(3);
