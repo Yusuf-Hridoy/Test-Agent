@@ -9,12 +9,14 @@ import { closeBrowser, openBrowser, type BrowserSession } from "../browser/sessi
 import { checkClick, checkGoto } from "../browser/guard.js";
 import { isEmpty } from "../browser/collect.js";
 import { resolveTarget } from "../browser/locate.js";
+import { takeSnapshot } from "../browser/snapshot.js";
 import { StepLog } from "../evidence/steps.js";
 import { ShotTaker } from "../evidence/shots.js";
 import { isoNow, sleep, stamp, truncate } from "../util.js";
 import { pageByKey, recordReplay, type MemoryDb } from "./db.js";
 import { normalizePageKey } from "./pagekey.js";
 import { SECRET_PLACEHOLDER, type FlowStepRow, type StoredFlow } from "./types.js";
+import type { Healer } from "./heal.js";
 
 /** How long a step's target may take to become unambiguous (§1.4). */
 export const RESOLVE_TIMEOUT_MS = 5_000;
@@ -36,6 +38,18 @@ export interface ReplayOptions {
   headed?: boolean;
   authName?: string;
   narrate?: (line: string) => void;
+  /**
+   * Opt-in repair for a step whose target cannot be found (§1.6). Absent by
+   * default: a replay that silently repairs itself is not a regression test.
+   */
+  healer?: Healer;
+}
+
+export interface HealedStep {
+  seq: number;
+  oldTarget: string;
+  newTarget: string;
+  note: string;
 }
 
 export interface ReplayResult {
@@ -54,6 +68,10 @@ export interface ReplayResult {
   environmentDown?: boolean;
   stepsRun: number;
   stepsTotal: number;
+  /** Steps a model relocated for this run. Non-empty means HEALED, not passed. */
+  healed: HealedStep[];
+  /** The healer's comment when it judged the flow genuinely broken. */
+  healNote?: string;
   reportDir: string;
   durationMs: number;
   /** Always all-zero: replay never calls a model. Asserted below. */
@@ -89,6 +107,10 @@ export async function replayFlow(
   let session: BrowserSession | undefined;
   let failure: { seq: number; reason: string; refused?: boolean } | undefined;
   let stepsRun = 0;
+  const healed: HealedStep[] = [];
+  /** The patched rows, kept beside the report-facing summary. */
+  const patches: FlowStepRow[] = [];
+  let healNote: string | undefined;
 
   const log = (seq: number, action: string, ok: boolean, detail: string, url: string) =>
     stepLog.append({
@@ -127,7 +149,48 @@ export async function replayFlow(
     // ---- steps -----------------------------------------------------------
     for (const step of flow.steps) {
       if (failure) break;
-      const outcome = await runStep(page, cfg, step);
+      let outcome = await runStep(page, cfg, step);
+
+      // ---- healing (§1.6) ------------------------------------------------
+      if (!outcome.ok && canHeal(opts, outcome, step)) {
+        const { snap } = await takeSnapshot(page);
+        const verdict = await opts.healer!({
+          flowName: flow.name,
+          flowDescription: flow.description,
+          step,
+          reason: outcome.detail,
+          snapshot: snap,
+        });
+        if (verdict.verdict === "relocated") {
+          const patched: FlowStepRow = {
+            ...step,
+            target_role: verdict.target.role,
+            target_name: verdict.target.name,
+            target_nth: verdict.target.nth,
+          };
+          // The retry goes through the same guards as any other step: a healer
+          // that "finds" a Logout button must still be refused.
+          const retry = await runStep(page, cfg, patched);
+          log(step.seq, `${step.action}:healed`, retry.ok, `${verdict.note} → ${retry.detail}`, page.url());
+          if (retry.ok) {
+            healed.push({
+              seq: step.seq,
+              oldTarget: describeTarget(step),
+              newTarget: describeTarget(patched),
+              note: verdict.note,
+            });
+            patches.push(patched);
+            narrate(`  [${step.seq}/${flow.steps.length}] healed: ${describeTarget(step)} → ${describeTarget(patched)}`);
+            outcome = retry;
+          } else {
+            // No second opinion on the same step (§1.6).
+            healNote = `${verdict.note}; the relocated target also failed: ${retry.detail}`;
+          }
+        } else {
+          healNote = verdict.note;
+        }
+      }
+
       stepsRun++;
       log(step.seq, step.action, outcome.ok, outcome.detail, page.url());
       narrate(`  [${step.seq}/${flow.steps.length}] ${describe(step)} → ${outcome.ok ? "OK" : "FAILED"}`);
@@ -191,11 +254,14 @@ export async function replayFlow(
     ...(failure && !failure.refused && looksLikeOutage(failure.reason) ? { environmentDown: true } : {}),
     stepsRun,
     stepsTotal: flow.steps.length,
+    healed,
+    ...(healNote ? { healNote } : {}),
     reportDir,
     durationMs: Date.now() - startedAt,
     usage: usage.snapshot(),
   };
 
+  if (healed.length && result.passed) applyHeals(project.db, flow, healed, patches, reportDir);
   recordOutcome(project.db, flow, result);
   fs.writeFileSync(
     path.join(reportDir, "replay.json"),
@@ -215,6 +281,12 @@ function recordOutcome(db: MemoryDb, flow: StoredFlow, result: ReplayResult): vo
     recordReplay(db, flow.id, `refused@${result.failedAt}`, flow.status, now);
     return;
   }
+  if (result.passed && result.healed.length) {
+    // Healed is NOT verified: something ran, but nobody has yet shown the
+    // application still does what this flow asserts (§1.6).
+    recordReplay(db, flow.id, `healed@${result.healed.map((h) => h.seq).join(",")}`, "draft", now);
+    return;
+  }
   if (result.passed) {
     recordReplay(db, flow.id, "pass", "verified", now);
     return;
@@ -225,6 +297,52 @@ function recordOutcome(db: MemoryDb, flow: StoredFlow, result: ReplayResult): vo
     return;
   }
   recordReplay(db, flow.id, `fail@${result.failedAt}`, "broken", now);
+}
+
+/**
+ * A step is healable when a model could plausibly answer the question. A guard
+ * refusal is a policy decision, and a `{secret}` value has nothing to type — in
+ * neither case is the target the problem.
+ */
+function canHeal(opts: ReplayOptions, outcome: StepOutcome, step: FlowStepRow): boolean {
+  if (!opts.healer || outcome.refused) return false;
+  if (step.value === SECRET_PLACEHOLDER) return false;
+  if (!step.target_name) return false;
+  return true;
+}
+
+export function describeTarget(step: FlowStepRow): string {
+  const nth = step.target_nth === null || step.target_nth === undefined ? "" : `#${step.target_nth}`;
+  return `${step.target_role ?? "?"}:"${step.target_name ?? ""}"${nth}`;
+}
+
+/**
+ * Persist a healed flow: record what changed, patch the steps, and demote it to
+ * draft so the next clean replay has to earn `verified` back.
+ */
+function applyHeals(
+  db: MemoryDb,
+  flow: StoredFlow,
+  healed: HealedStep[],
+  patches: FlowStepRow[],
+  sessionRef: string,
+): void {
+  const now = isoNow();
+  const event = db.prepare(
+    `INSERT INTO heal_events (flow_id, seq, old_target, new_target, model_note, session_ref, created_at)
+     VALUES (?,?,?,?,?,?,?)`,
+  );
+  const patch = db.prepare(
+    "UPDATE flow_steps SET target_role = ?, target_name = ?, target_nth = ? WHERE flow_id = ? AND seq = ?",
+  );
+  db.transaction(() => {
+    for (const h of healed) {
+      event.run(flow.id, h.seq, h.oldTarget, h.newTarget, h.note, sessionRef, now);
+      const patched = patches.find((p) => p.seq === h.seq);
+      if (!patched) continue;
+      patch.run(patched.target_role, patched.target_name, patched.target_nth, flow.id, h.seq);
+    }
+  })();
 }
 
 /** Where the flow starts: the page we actually saw, else the app's front door. */

@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { MagpieConfig, Provider, ProviderUsage } from "../types.js";
-import { loadConfig, projectPaths } from "../config/load.js";
+import { envSecrets, loadConfig, projectPaths } from "../config/load.js";
+import { SecretStore } from "../model/redact.js";
 import { UsageTracker } from "../model/usage.js";
 import type { GenerateFn } from "../model/ask.js";
 import { isoNow, stamp } from "../util.js";
@@ -17,6 +18,7 @@ import {
 import { fingerprintOf } from "./fingerprint.js";
 import { ingestSuite } from "./ingest.js";
 import { replayFlow, type ReplayResult } from "./replay.js";
+import { createHealer, type HealerHandle } from "./heal.js";
 import type { StoredFlow } from "./types.js";
 
 /**
@@ -233,6 +235,19 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
   const { openMemoryDb, closeDb } = await import("./db.js");
   const db = openMemoryDb(opts.dir);
   const usage = new UsageTracker();
+  // Healing is opt-in from either the flag or the config, and bounded for the
+  // whole suite — not per flow, or a long suite could spend all day healing.
+  const healingOn = opts.heal ?? cfg.regress.heal;
+  const healer: HealerHandle | undefined = healingOn
+    ? createHealer({
+        cfg,
+        usage,
+        secrets: new SecretStore(envSecrets(opts.dir)),
+        maxCalls: cfg.regress.max_heal_calls,
+        log: narrate,
+        ...(opts.generate ? { generate: opts.generate } : {}),
+      })
+    : undefined;
   const flows: SuiteFlowResult[] = [];
   const findings: SuiteFinding[] = [];
   let environmentDown = false;
@@ -281,12 +296,15 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
       const replay: ReplayResult = await replayFlow(flow, { dir: opts.dir, db }, {
         ...(opts.authName ? { authName: opts.authName } : {}),
         ...(opts.headed !== undefined ? { headed: opts.headed } : {}),
+        ...(healer ? { healer: healer.heal } : {}),
         narrate: (line) => narrate(line),
       });
 
       const after = flowBySlug(db, flow.slug);
       const outcome: FlowOutcome = replay.passed
-        ? "PASS"
+        ? replay.healed.length
+          ? "HEALED"
+          : "PASS"
         : replay.refused
           ? "REFUSED"
           : replay.environmentDown
@@ -311,6 +329,12 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
         durationMs: replay.durationMs,
         reportDir: replay.reportDir,
         ...(before.lastPass ? { lastPassAt: before.lastPass } : {}),
+        ...(replay.healed.length ? { healedStep: replay.healed[0]!.seq } : {}),
+        ...(replay.healed.length
+          ? { healNote: replay.healed.map((h) => `${h.oldTarget} → ${h.newTarget} (${h.note})`).join("; ") }
+          : replay.healNote
+            ? { healNote: replay.healNote }
+            : {}),
       });
       narrate(
         `  ${outcome}  ${flow.slug}` +
@@ -343,7 +367,10 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
         expected: f.lastPassAt
           ? `The flow "${f.name}" replays end to end, as it did on ${f.lastPassAt}.`
           : `The flow "${f.name}" replays end to end. It has been failing since ${since}.`,
-        actual: `Step ${f.failedAt} of ${f.stepsTotal} failed: ${f.reason ?? "no reason recorded"}`,
+        actual:
+          `Step ${f.failedAt} of ${f.stepsTotal} failed: ${f.reason ?? "no reason recorded"}` +
+          // The flow failing is the evidence; the model's note is context.
+          (f.healNote ? `\n\nHealer's note: ${f.healNote}` : ""),
         ...(f.lastPassAt ? { lastPassAt: f.lastPassAt } : {}),
         ...(lastPass ? { lastPassSession: `session ${lastPass.id} (${lastPass.status})` } : {}),
         // Filled in by ingestion, which knows the project's whole history.
@@ -383,6 +410,7 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
 
   const totals = tally(flows);
   const endedAt = new Date();
+  const healCalls = healer?.calls ?? 0;
   const result: SuiteResult = {
     magpieVersion: MAGPIE_VERSION,
     project: cfg.name,
@@ -393,13 +421,13 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
     selection: {
       requested: opts.requested,
       includeDraft: Boolean(opts.includeDraft),
-      heal: Boolean(opts.heal),
+      heal: healingOn,
     },
     totals,
     flows,
     findings,
     usage: usage.snapshot(),
-    healCalls: usage.totalRequests(),
+    healCalls,
     environmentDown,
     exitCode: exitCodeFor(totals, environmentDown),
     reportDir,
@@ -407,7 +435,7 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
 
   // The economic guarantee, asserted rather than assumed: without --heal a
   // whole suite must not cost a single model call.
-  if (!opts.heal && usage.totalRequests() !== 0) {
+  if (!healingOn && usage.totalRequests() !== 0) {
     throw new Error(
       `regression suite made ${usage.totalRequests()} model call(s) without --heal; it must make none`,
     );

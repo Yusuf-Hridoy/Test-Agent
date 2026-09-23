@@ -24,6 +24,8 @@ export interface MagpieConfig {
     ids?: Partial<Record<Provider, string>>;
   };
   run: { headed: boolean; slow_network_grace_ms: number };
+  /** Regression mode (Phase 3). Healing is off unless asked for. */
+  regress: { heal: boolean; max_heal_calls: number };
 }
 
 export interface ElementRef {
