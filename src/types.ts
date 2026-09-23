@@ -84,6 +84,16 @@ export interface Finding {
   screenshots: string[]; // paths relative to the report dir
   console?: string[];
   network?: string[];
+  /**
+   * What project memory knows about this defect (Phase 3). Absent when the
+   * session was not ingested — a report never claims history it does not have.
+   */
+  memory?: {
+    status: "NEW" | "KNOWN";
+    /** How many sessions have reported this same defect, including this one. */
+    seenCount: number;
+    firstSeenAt?: string;
+  };
 }
 
 export type Technique =

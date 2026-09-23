@@ -135,6 +135,54 @@ describe("performance oracle (P3-T3)", () => {
   });
 });
 
+describe("session findings across runs (P3-T5)", () => {
+  /** The same console error, two nights running. */
+  function withFinding(dir: string, n: number) {
+    const { result, reportDir } = sessionOn(dir, n, false);
+    result.findings = [
+      {
+        id: "F-001",
+        title: "Console error: TypeError at checkout",
+        severity: "medium",
+        oracle: "console_error",
+        confidence: "high",
+        expected: "no console errors",
+        actual: "TypeError",
+        steps: [1],
+        screenshots: [],
+      },
+    ];
+    return { result, reportDir };
+  }
+
+  it("reports a repeat defect as KNOWN with a count and a first-seen date", () => {
+    const dir = project();
+    const db = openMemoryDb(dir);
+
+    const first = withFinding(dir, 1);
+    const one = ingestSession(db, first.result, first.reportDir);
+    expect(one.verdicts[0]).toMatchObject({ status: "NEW", seenCount: 1 });
+
+    const second = withFinding(dir, 2);
+    const two = ingestSession(db, second.result, second.reportDir);
+    expect(two.verdicts[0]).toMatchObject({ status: "KNOWN", seenCount: 2 });
+    expect(two.verdicts[0]!.firstSeenAt).toBe(first.result.startedAt);
+    closeDb(db);
+  });
+
+  it("keeps a genuinely different defect NEW", () => {
+    const dir = project();
+    const db = openMemoryDb(dir);
+    const first = withFinding(dir, 1);
+    ingestSession(db, first.result, first.reportDir);
+
+    const second = withFinding(dir, 2);
+    second.result.findings[0]!.title = "Console error: ReferenceError in the header";
+    expect(ingestSession(db, second.result, second.reportDir).verdicts[0]!.status).toBe("NEW");
+    closeDb(db);
+  });
+});
+
 describe("regression findings across suites (P3-T3/T5)", () => {
   function suite(db: MemoryDb, reportDir: string, n: number) {
     return ingestSuite(db, {

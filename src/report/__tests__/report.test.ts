@@ -167,3 +167,39 @@ describe("terminal report", () => {
     expect(text).toContain("✔ O-01");
   });
 });
+
+describe("NEW vs KNOWN findings (P3-T5)", () => {
+  it("leads with what is new and keeps the flat list when memory said nothing", () => {
+    const { result, steps } = fixture();
+    // No memory verdicts → exactly the Phase 1 report.
+    expect(renderReport({ result, cfg, steps, budgetSummary: "x", providerSummary: "y" })).toContain(
+      "<h2>Findings</h2>",
+    );
+
+    result.findings[0]!.memory = { status: "KNOWN", seenCount: 4, firstSeenAt: "2026-09-01T10:00:00+02:00" };
+    for (const f of result.findings.slice(1)) f.memory = { status: "NEW", seenCount: 1 };
+    const html = renderReport({ result, cfg, steps, budgetSummary: "x", providerSummary: "y" });
+
+    expect(html).toContain("Known findings (1)");
+    expect(html).toContain("KNOWN — seen 4× since 2026-09-01");
+    // New comes first: a reader with thirty seconds sees tonight's damage.
+    expect(html.indexOf("New findings")).toBeLessThan(html.indexOf("Known findings"));
+
+    const terminal = renderTerminalReport({
+      result,
+      budgetSummary: "x",
+      providerSummary: "y",
+      htmlPath: "/tmp/report.html",
+    });
+    expect(terminal).toMatch(/findings \(\d+: \d+ new, 1 known\)/);
+    expect(terminal).toContain("×4");
+  });
+
+  it("says so plainly when nothing is new", () => {
+    const { result, steps } = fixture();
+    for (const f of result.findings) f.memory = { status: "KNOWN", seenCount: 2 };
+    const html = renderReport({ result, cfg, steps, budgetSummary: "x", providerSummary: "y" });
+    expect(html).toContain("New findings (0)");
+    expect(html).toContain("Nothing new");
+  });
+});

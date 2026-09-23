@@ -39,10 +39,17 @@ export function renderTerminalReport(args: {
   }
 
   if (result.findings.length) {
-    lines.push(`findings (${result.findings.length})`);
+    const graded = result.findings.filter((f) => f.memory);
+    const fresh = result.findings.filter((f) => f.memory?.status === "NEW").length;
+    lines.push(
+      graded.length
+        ? `findings (${result.findings.length}: ${fresh} new, ${graded.length - fresh} known)`
+        : `findings (${result.findings.length})`,
+    );
     for (const f of result.findings) {
+      const seen = f.memory ? (f.memory.status === "NEW" ? "NEW  " : `×${f.memory.seenCount}`.padEnd(5)) : "     ";
       lines.push(
-        `  ${pad(f.id, 6)} ${pad(f.severity, 7)} ${pad(f.oracle, 20)} ${pad(f.confidence, 5)} ${truncate(f.title, 44)}`,
+        `  ${pad(f.id, 6)} ${seen} ${pad(f.severity, 7)} ${pad(f.oracle, 20)} ${pad(f.confidence, 5)} ${truncate(f.title, 38)}`,
       );
     }
   } else {
