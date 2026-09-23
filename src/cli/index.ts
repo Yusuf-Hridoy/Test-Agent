@@ -42,7 +42,75 @@ program
     await runCommand(opts);
   });
 
+const memory = program.command("memory").description("Inspect what Magpie remembers");
+
+memory
+  .command("show")
+  .description("Pages, flows and sessions this project remembers")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (opts: { dir?: string }) => {
+    const { memoryShowCommand } = await import("./memory.js");
+    memoryShowCommand(opts);
+  });
+
+memory
+  .command("stats")
+  .description("Database size and totals")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (opts: { dir?: string }) => {
+    const { memoryStatsCommand } = await import("./memory.js");
+    memoryStatsCommand(opts);
+  });
+
 const flows = program.command("flows").description("Work with remembered flows");
+
+flows
+  .command("list")
+  .description("List remembered flows")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (opts: { dir?: string }) => {
+    const { flowsListCommand } = await import("./flows.js");
+    flowsListCommand(opts);
+  });
+
+flows
+  .command("show <slug>")
+  .description("Show a flow's steps in replay order")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (slug: string, opts: { dir?: string }) => {
+    const { flowsShowCommand } = await import("./flows.js");
+    flowsShowCommand(slug, opts);
+  });
+
+flows
+  .command("rename <slug> <name...>")
+  .description("Give a flow a human name")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (slug: string, name: string[], opts: { dir?: string }) => {
+    const { flowsRenameCommand } = await import("./flows.js");
+    flowsRenameCommand(slug, name.join(" "), opts);
+  });
+
+flows
+  .command("verify <slug>")
+  .description("Prove a flow still runs, and promote it to verified")
+  .option("--as <name>", "auth profile name", "default")
+  .option("--headed", "show the browser window")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (slug: string, opts: { as?: string; headed?: boolean; dir?: string }) => {
+    const { flowsVerifyCommand } = await import("./flows.js");
+    await flowsVerifyCommand({ slug, ...opts });
+  });
+
+flows
+  .command("delete <slug>")
+  .description("Forget a flow (its steps go with it)")
+  .option("-y, --yes", "do not ask for confirmation")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (slug: string, opts: { yes?: boolean; dir?: string }) => {
+    const { flowsDeleteCommand } = await import("./flows.js");
+    await flowsDeleteCommand(slug, opts);
+  });
 
 flows
   .command("replay <slug>")
