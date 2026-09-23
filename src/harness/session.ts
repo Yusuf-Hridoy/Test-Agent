@@ -29,7 +29,7 @@ import { Budget, describeBudgetHit } from "./budgets.js";
 import { fingerprint, LoopDetector } from "./loopdetect.js";
 import { classifyActionResult, slowGrace, waitForRecovery } from "./envmon.js";
 import { ensureAuthenticated } from "./auth.js";
-import { ingestIntoMemory } from "../memory/record.js";
+import { ingestIntoMemory, readMemoryContext } from "../memory/record.js";
 import { normalizePageKey } from "../memory/pagekey.js";
 import { isoNow, sleep, stamp, truncate } from "../util.js";
 
@@ -148,6 +148,9 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
 
     // ---- PLANNING --------------------------------------------------------
     let current = await snapshot(page);
+    // What previous sessions learned about this app, if anything (Phase 2).
+    const memory = readMemoryContext(opts.dir, opts.charter);
+    if (memory) narrate("planning with what previous sessions learned about this app");
     try {
       objectives = await planSession({
         charter: opts.charter,
@@ -156,6 +159,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
         usage,
         secrets,
         log: narrate,
+        ...(memory ? { memory } : {}),
         ...(opts.generate ? { generate: opts.generate } : {}),
       });
     } catch (err) {

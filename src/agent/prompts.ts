@@ -54,6 +54,9 @@ Rules:
   refuse the unsafe action — safety is enforced by the system, not by leaving
   the objective out of the plan.
 - Choose the technique that matches what the objective actually exercises.
+- If the charter matches an existing verified flow, plan objectives that EXTEND
+  or VARY it rather than re-testing identical ground, and say so in the
+  objective description.
 
 Answer with STRICT JSON ONLY: an array of 5 to 15 objects, no prose, no code
 fences, shaped exactly:
@@ -62,12 +65,18 @@ fences, shaped exactly:
 technique must be one of: happy-path, boundary, required-field, invalid-input,
 cancel-midway, duplicate, state-transition.`;
 
-export function plannerUserMessage(charter: string, snap: Snapshot): string {
+/**
+ * `memory` is the app briefing from previous sessions (Phase 2). It is omitted
+ * entirely for an application Magpie has never seen, so a first run sends
+ * exactly the message Phase 1 sent.
+ */
+export function plannerUserMessage(charter: string, snap: Snapshot, memory?: string): string {
   return [
     `CHARTER: ${charter}`,
     ``,
     `LANDING PAGE SNAPSHOT:`,
     renderSnapshot(snap),
+    ...(memory ? [``, memory] : []),
   ].join("\n");
 }
 

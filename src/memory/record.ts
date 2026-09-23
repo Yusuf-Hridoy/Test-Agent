@@ -2,6 +2,7 @@ import type { SessionResult, Snapshot } from "../types.js";
 import type { SecretStore } from "../model/redact.js";
 import { closeDb, openMemoryDb, type MemoryDb } from "./db.js";
 import { ingestSession } from "./ingest.js";
+import { buildMemoryContext } from "./context.js";
 
 export interface RecordArgs {
   dir: string;
@@ -38,6 +39,23 @@ export function ingestIntoMemory(args: RecordArgs): void {
   } catch (err) {
     args.observe?.("memory_ingest_failed", `could not write project memory: ${(err as Error).message}`);
     args.narrate?.(`memory: not updated (${(err as Error).message})`);
+  } finally {
+    closeDb(db);
+  }
+}
+
+/**
+ * The app briefing handed to the planner, or undefined when this project has no
+ * memory yet. Failures are silent by design: an unreadable database must cost a
+ * session its memory, never its run.
+ */
+export function readMemoryContext(dir: string, charter: string): string | undefined {
+  let db: MemoryDb | undefined;
+  try {
+    db = openMemoryDb(dir);
+    return buildMemoryContext(db, charter);
+  } catch {
+    return undefined;
   } finally {
     closeDb(db);
   }
