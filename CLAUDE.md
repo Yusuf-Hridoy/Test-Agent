@@ -158,8 +158,8 @@ A **project folder** (created by `magpie init`, lives anywhere on the user's dis
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | **CURRENT** |
-| 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | pending |
+| 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | complete (2026-09-19) |
+| 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | **CURRENT** |
 | 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | pending |
 | 4 | Explore mode: coverage matrix, scenario planner, CI integration | pending |
 | 5 | Polish: dashboard, docs site, public launch | pending |
@@ -204,7 +204,7 @@ early, even partially, unless the brief says to leave a seam for them.
 
 ## 11. Current status
 
-- Phase: 1 — **acceptance passed 2026-09-19**. Next: await PHASE-2-BRIEF.md. Do NOT start Phase 2.
+- Phase: 2 — **in progress**, started 2026-09-23 on branch `phase-2`. Brief: PHASE-2-BRIEF.md (in the repo). Phase 1 acceptance passed 2026-09-19.
 - Scenario results: **S0, S1, S2, S5, S6, S7, S8 PASS** as specified. **S3, S4 PASS by simulation** — a local server made unreachable on cue (state preserved) standing in for the Wi-Fi toggle, which no agent can perform. S7's `git status` half is N/A: the user chose to skip `git init`.
 - Live running found and fixed **19 real defects**; PHASE-1-ACCEPTANCE-BRIEF.md carries the per-scenario Run Log with root causes. 141 tests green, build clean.
 - Outstanding, by choice rather than blockage:
