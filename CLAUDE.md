@@ -230,11 +230,17 @@ early, even partially, unless the brief says to leave a seam for them.
 
 ## 11. Current status
 
-- Phase: 3 — **in progress**, started 2026-09-23 on branch `phase-3`. Brief: PHASE-3-BRIEF.md (in the repo).
-- Phase 2 — complete, acceptance run 2026-09-23, merged to `main` the same day (PR #1); the per-task `P2-Tn:` commits are unsquashed on main. Brief + Run Log: PHASE-2-BRIEF.md.
+- Phase: 3 — **complete, acceptance run 2026-09-23** on branch `phase-3`; PR open, awaiting review. Brief + Run Log: PHASE-3-BRIEF.md. Next: await PHASE-4-BRIEF.md. Do NOT start Phase 4.
+- Scenario results: **B1–B9 all PASS**. Acceptance spent 10 model requests in total (8 recording a charter, 2 healing); everything else ran free. 225 tests green, build clean.
+- What works, measured live: a catalogue flow records *which* button it clicked and replays the third product exactly (screenshot-verified) in 2.1 s for nothing; `run --regress all` is a CI-ready suite with schema-valid `suite.json` on stdout; a renamed control is healed, patched and demoted to draft; a removed control makes the model answer **broken** rather than invent a relocation, producing a high-confidence `regression` finding that cites when the flow last passed; the same defect reports KNOWN(2×) the next night.
+- Known hazard, top candidate for Phase 4: **a broken flow makes CI green.** `--regress all` skips `broken` flows and skipping is not failing, so a suite whose flows have all broken exits 0 while testing nothing. Exit codes were fixed by the brief, so this is documented with a `jq` gate on `totals.skipped` in docs/ci.md rather than changed unilaterally. A `--fail-on-skipped` flag is the clean fix.
+
+### Phase 2 (complete 2026-09-23), for reference
+
+- Merged to `main` the same day (PR #1); the per-task `P2-Tn:` commits are unsquashed on main. Brief + Run Log: PHASE-2-BRIEF.md.
 - Scenario results: **A2–A7 PASS**. **A1 PARTIAL** — `pages=1` instead of ≥3 because every objective of the demo charter ran on `/inventory.html`; diagnosed in the Run Log as a faithful record, not a defect (the map reached 5 pages / 4 transitions under a navigational charter).
 - What works, measured live against www.saucedemo.com: three sessions ingested (≈73 Gemini requests total); a 4-step checkout-form flow recorded by the agent **replays in 2.0 s with zero model calls**; a flow broken on purpose fails at the exact step with screenshot, trace and all-zero usage; the third session's planner referenced a finding remembered from the first. 194 tests green, build clean.
-- Known limitation, top candidate for Phase 3: **ambiguous targets**. `flow_steps` records role + accessible name only, so "add *this* item" on a catalogue page (six identical "Add to cart" buttons on saucedemo) cannot be replayed and fails by design. The fix is fidelity, not healing — record which of the N matches was acted on (`target_nth`, migration 002).
+- Known limitation — **resolved in Phase 3** by `target_nth` (migration 002): role+name alone could not express "add *this* item" on a catalogue page, so six identical "Add to cart" buttons made the flow unreplayable.
 
 ### Phase 1 (complete 2026-09-19), for reference
 

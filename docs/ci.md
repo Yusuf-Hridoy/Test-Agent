@@ -107,6 +107,23 @@ you get the human summary on stdout instead.
           test "$new" -eq 0
 ```
 
+### Watch the skipped count, not just the exit code
+
+A `broken` flow is **skipped**, and skipping is not failing — so a suite whose
+flows have all broken exits `0` while testing nothing at all. That is the one
+way this design can go quietly green, and it is worth one line of defence:
+
+```yaml
+      - name: Refuse to pass while flows are broken
+        working-directory: tests/magpie
+        run: |
+          jq -e '.totals.skipped == 0' suite.json \
+            || { echo "::warning::flows are broken and were not replayed"; exit 1; }
+```
+
+Either fix those flows (`--heal`, or re-record the charter) or delete them. A
+regression suite that shrinks silently is worse than no suite.
+
 ## Cron (a plain server)
 
 ```cron
