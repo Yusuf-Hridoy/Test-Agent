@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Locator, Page } from "playwright";
+import type { Page } from "playwright";
 import type { MagpieConfig, Provider, ProviderUsage } from "../types.js";
 import { envSecrets, loadConfig, projectPaths } from "../config/load.js";
 import { SecretStore } from "../model/redact.js";
@@ -8,6 +8,7 @@ import { UsageTracker } from "../model/usage.js";
 import { closeBrowser, openBrowser, type BrowserSession } from "../browser/session.js";
 import { checkClick, checkGoto } from "../browser/guard.js";
 import { isEmpty } from "../browser/collect.js";
+import { resolveTarget } from "../browser/locate.js";
 import { StepLog } from "../evidence/steps.js";
 import { ShotTaker } from "../evidence/shots.js";
 import { isoNow, sleep, stamp, truncate } from "../util.js";
@@ -265,8 +266,14 @@ async function runStep(page: Page, cfg: MagpieConfig, step: FlowStepRow): Promis
     };
   }
 
-  const found = await resolveTarget(page, step);
-  if ("error" in found) return { ok: false, detail: found.error };
+  const found = await resolveTarget(
+    page,
+    { role: step.target_role, name: step.target_name ?? "", nth: step.target_nth },
+    RESOLVE_TIMEOUT_MS,
+  );
+  if (!found.locator) {
+    return { ok: false, detail: found.error ?? "target could not be resolved" };
+  }
 
   try {
     switch (step.action) {
@@ -286,62 +293,6 @@ async function runStep(page: Page, cfg: MagpieConfig, step: FlowStepRow): Promis
     return { ok: true, detail: `${step.action} "${step.target_name}"` };
   } catch (err) {
     return { ok: false, detail: `could not ${step.action} "${step.target_name}": ${firstLine(err)}` };
-  }
-}
-
-/**
- * Resolve a step's target to exactly one element, or fail.
- *
- * Exact name first, then a substring match, then plain text. Ambiguity after
- * the timeout is a failure by design (§1.4): picking "the first of six Add to
- * cart buttons" would be a guess wearing a deterministic costume, and healing
- * belongs to Phase 3.
- */
-export async function resolveTarget(
-  page: Page,
-  step: Pick<FlowStepRow, "target_role" | "target_name">,
-  timeoutMs = RESOLVE_TIMEOUT_MS,
-): Promise<{ locator: Locator } | { error: string }> {
-  const name = step.target_name;
-  if (!name) return { error: `step has no target to resolve` };
-  const role = step.target_role as Parameters<Page["getByRole"]>[0] | null;
-
-  const deadline = Date.now() + timeoutMs;
-  let lastCount = 0;
-  let lastWhere = "role+name";
-
-  for (;;) {
-    const candidates: [string, Locator][] = [];
-    if (role) {
-      candidates.push([`role=${role} name="${name}" (exact)`, page.getByRole(role, { name, exact: true })]);
-      candidates.push([`role=${role} name~"${name}"`, page.getByRole(role, { name, exact: false })]);
-    }
-    candidates.push([`text="${name}"`, page.getByText(name, { exact: false })]);
-
-    for (const [where, locator] of candidates) {
-      let count: number;
-      try {
-        count = await locator.count();
-      } catch {
-        continue; // a navigating page cannot be counted; try again next poll
-      }
-      if (count === 1) return { locator };
-      if (count > 0) {
-        lastCount = count;
-        lastWhere = where;
-      }
-    }
-
-    if (Date.now() >= deadline) {
-      return {
-        error:
-          lastCount === 0
-            ? `no element matched ${role ? `${role} ` : ""}"${truncate(name, 60)}" after ${timeoutMs / 1000}s`
-            : `${lastCount} elements matched ${lastWhere} after ${timeoutMs / 1000}s — ` +
-              `ambiguous targets are a replay failure, not a guess`,
-      };
-    }
-    await sleep(POLL_MS);
   }
 }
 
@@ -375,8 +326,15 @@ export function describe(step: FlowStepRow): string {
     case "select":
       return `select "${step.value}" in "${step.target_name}"`;
     default:
-      return `${step.action} "${step.target_name}"`;
+      return `${step.action} "${step.target_name}"${position(step)}`;
   }
+}
+
+/** Shown as 1-based in the CLI: "the 3rd match" reads better than "#2". */
+function position(step: FlowStepRow): string {
+  return step.target_nth === null || step.target_nth === undefined || step.target_nth === 0
+    ? ""
+    : ` (match ${step.target_nth + 1})`;
 }
 
 function firstLine(err: unknown): string {

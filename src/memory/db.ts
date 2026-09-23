@@ -15,14 +15,14 @@ import type {
 export type MemoryDb = Database.Database;
 
 export const DB_FILENAME = "magpie.db";
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /**
  * Migrations are numbered SQL strings applied in order at open. Never edit one
  * that has shipped — add the next number instead; existing project databases
  * only ever run the migrations they have not seen.
  */
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   // 001 — PHASE-2-BRIEF §1.2
   `
   CREATE TABLE sessions (
@@ -78,6 +78,23 @@ const MIGRATIONS: string[] = [
     page_key TEXT, created_at TEXT NOT NULL
   );
   CREATE INDEX idx_findings_page ON findings(page_key);
+  `,
+  // 002 — PHASE-3-BRIEF §1.1. The brief's trailing `UPDATE schema_version` is
+  // omitted on purpose: migrate() owns the version, and two writers of the same
+  // number is one too many.
+  `
+  ALTER TABLE flow_steps ADD COLUMN target_nth INTEGER;
+  ALTER TABLE findings  ADD COLUMN fingerprint TEXT;
+  ALTER TABLE findings  ADD COLUMN first_seen_session INTEGER;
+  CREATE TABLE observations (
+    id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES sessions(id),
+    type TEXT NOT NULL, page_key TEXT, detail TEXT, created_at TEXT NOT NULL);
+  CREATE INDEX idx_obs_page ON observations(page_key, type);
+  CREATE TABLE heal_events (
+    id INTEGER PRIMARY KEY, flow_id INTEGER NOT NULL REFERENCES flows(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, old_target TEXT NOT NULL, new_target TEXT NOT NULL,
+    model_note TEXT, session_ref TEXT, created_at TEXT NOT NULL);
+  CREATE INDEX idx_findings_fingerprint ON findings(fingerprint);
   `,
 ];
 

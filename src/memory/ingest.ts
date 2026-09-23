@@ -233,6 +233,7 @@ export function stepsForFlow(actions: FlowAction[], clean: (t: string) => string
       target_name: a.target ? clean(a.target.name) : null,
       value: valueFor(a, clean),
       url_after: a.url ? normalizePageKey(a.url) : null,
+      target_nth: a.targetNth ?? null,
     }));
 }
 
@@ -246,11 +247,34 @@ function valueFor(action: FlowAction, clean: (t: string) => string): string | nu
   return value.includes(REDACTED) ? SECRET_PLACEHOLDER : value;
 }
 
-/** Two flows are "the same flow" when their replayable steps are identical. */
+/**
+ * Two flows are "the same flow" when their replayable steps are identical.
+ *
+ * `target_nth` is deliberately NOT part of the identity: a flow re-recorded
+ * after Phase 3 is the same flow, now with a position recorded. Including it
+ * would fork every legacy flow into a "-2" twin on the next run.
+ */
 export function signatureOf(steps: NewStep[] | FlowStepRow[]): string {
   return JSON.stringify(
     steps.map((s) => [s.action, s.target_role, s.target_name, s.value, s.url_after]),
   );
+}
+
+/**
+ * A fresher recording of a known flow can teach it where its targets are.
+ * Only fills gaps — a position already recorded is never overwritten by ingest,
+ * because the stored one may have been repaired by healing.
+ */
+function adoptPositions(db: MemoryDb, flowId: number, steps: NewStep[]): number {
+  let taught = 0;
+  const update = db.prepare(
+    "UPDATE flow_steps SET target_nth = ? WHERE flow_id = ? AND seq = ? AND target_nth IS NULL",
+  );
+  for (const s of steps) {
+    if (s.target_nth === null) continue;
+    taught += update.run(s.target_nth, flowId, s.seq).changes;
+  }
+  return taught;
 }
 
 function storeFlow(
@@ -293,10 +317,20 @@ function storeFlow(
           ).lastInsertRowid,
       );
       const insert = db.prepare(
-        "INSERT INTO flow_steps (flow_id, seq, action, target_role, target_name, value, url_after) VALUES (?,?,?,?,?,?,?)",
+        `INSERT INTO flow_steps (flow_id, seq, action, target_role, target_name, value, url_after, target_nth)
+         VALUES (?,?,?,?,?,?,?,?)`,
       );
       for (const s of steps) {
-        insert.run(flowId, s.seq, s.action, s.target_role, s.target_name, s.value, s.url_after);
+        insert.run(
+          flowId,
+          s.seq,
+          s.action,
+          s.target_role,
+          s.target_name,
+          s.value,
+          s.url_after,
+          s.target_nth,
+        );
       }
       return { slug: candidate, created: true };
     }
@@ -306,7 +340,10 @@ function storeFlow(
     const existingSteps = db
       .prepare("SELECT * FROM flow_steps WHERE flow_id = ? ORDER BY seq")
       .all(existing.id) as FlowStepRow[];
-    if (signatureOf(existingSteps) === signature) return { slug: candidate, created: false };
+    if (signatureOf(existingSteps) === signature) {
+      adoptPositions(db, existing.id, steps);
+      return { slug: candidate, created: false };
+    }
   }
   return { slug: base, created: false };
 }

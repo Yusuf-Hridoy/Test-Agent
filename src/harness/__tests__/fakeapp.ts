@@ -10,10 +10,16 @@ export interface FakeApp {
   close: () => Promise<void>;
   /** Rename the add-to-cart button, so a replay can be made to break on cue. */
   setAddLabel: (label: string) => void;
+  /** Which catalogue item was last added — proves WHICH button a replay clicked. */
+  lastPicked: () => string | undefined;
+  /** Remove one catalogue item entirely, so a flow breaks for a real reason. */
+  setCatalogue: (items: string[]) => void;
 }
 
 export async function startFakeApp(fixedPort = 0): Promise<FakeApp> {
   let addLabel = "Add to cart";
+  let picked: string | undefined;
+  let catalogue = ["Item A", "Item B", "Item C"];
   const page = (body: string) =>
     `<!doctype html><html><head><title>Fixture Shop</title></head><body>${body}</body></html>`;
 
@@ -25,6 +31,11 @@ export async function startFakeApp(fixedPort = 0): Promise<FakeApp> {
       // only the 401 surfaces, with no browser-generated console error.
       res.writeHead(401, { "content-type": "text/plain", "access-control-allow-origin": "*" });
       res.end("no");
+      return;
+    }
+    if (url.pathname.startsWith("/picked/")) {
+      picked = decodeURIComponent(url.pathname.slice("/picked/".length));
+      res.writeHead(204).end();
       return;
     }
     if (url.pathname === "/api/boom") {
@@ -45,6 +56,24 @@ export async function startFakeApp(fixedPort = 0): Promise<FakeApp> {
             <a href="/logout">Logout</a>`),
         );
         return;
+      case "/catalogue": {
+        // Three products whose buttons are indistinguishable by accessible
+        // name — the exact shape that defeated Phase 2 replay.
+        const rows = catalogue
+          .map(
+            (item) =>
+              `<div><span>${item}</span> <button onclick="pick('${item}')">${addLabel}</button></div>`,
+          )
+          .join("");
+        res.end(
+          page(`<h1>Catalogue</h1><span id="picked">picked: none</span>${rows}
+            <script>function pick(x){
+              document.getElementById('picked').textContent='picked: '+x;
+              fetch('/picked/'+encodeURIComponent(x));
+            }</script>`),
+        );
+        return;
+      }
       case "/broken":
         res.end(page(`<h1>Broken</h1><script>console.error("TypeError: totally broken")</script>`));
         return;
@@ -71,6 +100,11 @@ export async function startFakeApp(fixedPort = 0): Promise<FakeApp> {
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
     setAddLabel: (label: string) => {
       addLabel = label;
+    },
+    lastPicked: () => picked,
+    setCatalogue: (items: string[]) => {
+      catalogue = items;
+      picked = undefined;
     },
   };
 }

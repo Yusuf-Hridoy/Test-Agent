@@ -82,6 +82,11 @@ export interface FlowStepRow {
   target_name: string | null;
   value: string | null;
   url_after: string | null;
+  /**
+   * 0-based position among the elements replay will match by role+name.
+   * NULL on flows recorded before Phase 3 — those still fail on ambiguity.
+   */
+  target_nth: number | null;
 }
 
 export interface FindingRow {
@@ -93,6 +98,29 @@ export interface FindingRow {
   oracle: string;
   confidence: string;
   page_key: string | null;
+  created_at: string;
+  /** Identity of the DEFECT across sessions (§1.5), not of this sighting. */
+  fingerprint: string | null;
+  first_seen_session: number | null;
+}
+
+export interface ObservationRow {
+  id: number;
+  session_id: number;
+  type: string;
+  page_key: string | null;
+  detail: string | null;
+  created_at: string;
+}
+
+export interface HealEventRow {
+  id: number;
+  flow_id: number;
+  seq: number;
+  old_target: string;
+  new_target: string;
+  model_note: string | null;
+  session_ref: string | null;
   created_at: string;
 }
 

@@ -488,6 +488,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
           flows.record({
             action: call.toolName,
             ...targetOf(call.toolName, call.input, acting.snap),
+            ...(result.targetNth !== undefined ? { targetNth: result.targetNth } : {}),
             // Where the flow starts matters to replay, and only the pre-action
             // snapshot knows it — `current` has already moved on.
             fromUrl: acting.snap.url,

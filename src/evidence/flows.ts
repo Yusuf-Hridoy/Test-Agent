@@ -11,6 +11,8 @@ export interface FlowAction {
   action: string;
   target?: { role: string; name: string };
   value?: string;
+  /** 0-based position among same-role+name elements, when one was determined. */
+  targetNth?: number;
   /** The URL the model was looking at when it chose this action. */
   fromUrl?: string;
   /** The URL after the action ran. */
