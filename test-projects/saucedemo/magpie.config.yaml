@@ -1,0 +1,55 @@
+# Magpie project config — safe to commit. Secrets live in .env (gitignored).
+name: "saucedemo"
+# Where every session starts. If your app's landing page always shows the login
+# form, point this at a page that requires a session (e.g. /dashboard) so Magpie
+# can tell a live session from a dead one.
+base_url: "https://www.saucedemo.com/inventory.html"
+
+auth:
+  # manual      → capture a session by hand with `magpie login`
+  # form-login  → Magpie fills the login form itself using the env vars below
+  strategy: manual
+  # login_url: "https://www.saucedemo.com/login"
+  user_env: APP_USER
+  pass_env: APP_PASS
+
+# Scope guard. Globs are matched against "host/path" (no scheme).
+# "**" crosses path segments; "*" does not.
+scope:
+  include:
+  - "www.saucedemo.com/**"
+  exclude: []
+  #  - "*/admin/**"
+
+# Elements the agent is never allowed to click (case-insensitive substring
+# match against the element's accessible name).
+forbidden_elements:
+  - "logout"
+  - "log out"
+  - "sign out"
+  - "delete"
+  - "remove account"
+  - "billing"
+  - "payment"
+  - "purchase"
+  - "subscribe"
+
+# Hard limits enforced by the harness, not by prompting.
+budget:
+  max_steps: 80
+  max_llm_requests: 60
+  max_minutes: 20
+
+model:
+  primary: gemini
+  fallback: [groq, mistral]
+  # Minimum delay between calls to the same provider (Gemini free tier ≈ 7s).
+  min_delay_ms: 7000
+  # Override model IDs if a provider retires one:
+  # ids:
+  #   gemini: gemini-2.5-flash
+
+run:
+  headed: false
+  # Extra grace given to a slow page before a timeout becomes a failure.
+  slow_network_grace_ms: 15000
