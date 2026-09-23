@@ -10,11 +10,12 @@ and a Playwright trace.
 
 It runs on **free-tier LLM APIs** (Gemini, Groq, Mistral). No paid key required.
 
-> **Phase 2.** The execution core (`init`, `login`, `run --charter`, budgets,
-> guards, evidence, reports) is complete, and Magpie now **remembers**: every run
-> is folded into a per-project SQLite memory, passed flows compile into
-> deterministic replays that cost **zero model calls**, and later sessions plan
-> against the app map instead of rediscovering it. See [Memory](#memory).
+> **Phase 3.** Magpie explores (`run --charter`), **remembers** (a per-project
+> SQLite memory: app map, replayable flows, past findings) and now **regresses**:
+> `run --regress all` replays every verified flow for **zero model calls**, tells
+> you what broke since last night, and is ready for a cron job.
+> See [Memory](#memory), [Regression mode](#regression-mode) and
+> [Running Magpie in CI](docs/ci.md).
 
 ---
 
@@ -87,14 +88,16 @@ reports/2026-09-16_14-32-05/
 | `magpie memory stats` | Database size, totals, schema version |
 | `magpie flows list` | Every remembered flow: status, steps, last replay |
 | `magpie flows show <slug>` | One flow's steps, in the order replay runs them |
-| `magpie flows replay <slug> [--headed] [--as <name>]` | Replay a flow against the live app — **no model calls** |
+| `magpie run --regress all [--include-draft] [--heal] [--json]` | Replay remembered flows as a suite — **no model calls** unless you pass `--heal` |
+| `magpie flows replay <slug> [--headed] [--as <name>]` | Replay one flow against the live app — **no model calls** |
 | `magpie flows verify <slug>` | Replay, and promote the flow to `verified` if it passes |
 | `magpie flows rename <slug> <new name>` | Give a flow a human name |
 | `magpie flows delete <slug> [-y]` | Forget a flow (its steps go with it) |
 
-Exit codes: `0` a report exists (COMPLETED or BUDGET_EXHAUSTED), or a replay
-passed · `1` a replay **failed** · `2` blocked (ENVIRONMENT_DOWN, PLAN_FAILED,
-CRASHED) · `3` auth or config problem.
+Exit codes: `0` a report exists (COMPLETED or BUDGET_EXHAUSTED), or every replay
+passed · `1` a replay **failed or was healed** · `2` blocked (ENVIRONMENT_DOWN,
+PLAN_FAILED, CRASHED) · `3` auth or config problem. Full table for regression
+runs: [docs/ci.md](docs/ci.md#exit-codes).
 
 ## Configuration (`magpie.config.yaml`)
 
@@ -116,6 +119,8 @@ CRASHED) · `3` auth or config problem.
 | `model.ids` | see below | Override a model ID when a provider retires one |
 | `run.headed` | `false` | Show the browser |
 | `run.slow_network_grace_ms` | `15000` | Extra time a timed-out action gets on one retry before it counts as a failure |
+| `regress.heal` | `false` | Let a model relocate a failed step during `--regress` (same as `--heal`) |
+| `regress.max_heal_calls` | `10` | Hard cap on healing model calls for a whole suite |
 
 Default models (all free-tier, all tool-calling). Free-tier quotas are **per
 model per day** — Magpie defaults to models whose daily quota can sustain a whole
@@ -157,6 +162,8 @@ Every finding records *which* check fired and how much to trust it:
 | `http_4xx_unexpected` | high | a user-triggered request 404'd/403'd |
 | `console_error` | high | the page logged an error |
 | `llm_judgment` | **low** | the model judged behaviour wrong |
+| `regression` | high | a flow that used to replay no longer does |
+| `performance` | **low** | the same page needed extra time on its last three visits |
 
 A site that is simply down is never reported as a bug: connection failures, DNS
 errors and mass 5xx pause the session, retry at 30/60/120 s, and finalize as
@@ -245,6 +252,80 @@ sqlite3 memory/magpie.db .schema         # it is just SQLite — read it however
 choice and a reasonable one: it holds no secrets, and checking it in gives your
 team a shared set of replayable flows that arrive with the repository. Delete the
 `memory/` line from the generated `.gitignore` if you want that.
+
+## Regression mode
+
+Once flows are remembered, a whole suite of them replays for nothing:
+
+```bash
+magpie run --regress all                  # every verified flow, no model calls
+magpie run --regress all --include-draft  # …and the ones not yet proven
+magpie run --regress add-item-to-cart     # just this one, whatever its status
+magpie run --regress all --json > suite.json   # machine-readable, for CI
+```
+
+```
+── REGRESSIONS ───────────────────────────────────────────────
+  OUTCOME  FLOW                     STEPS  TIME   DETAIL
+  PASS     log-in                   3/3    2.1s
+  FAIL@3   add-item-to-cart         2/5    6.4s   no element matched "Add to cart"
+  SKIP     checkout-with-card       0/6    0.0s   broken — heal it or re-record it
+
+totals    1 passed · 1 failed · 0 healed · 0 refused · 1 skipped · 0 untested
+LLM requests: 0
+findings  1 new · 0 known
+  R-001 NEW   Flow "add-item-to-cart" no longer passes
+```
+
+**Nothing is quietly dropped.** A `broken` flow is listed as SKIPPED with the
+reason rather than disappearing from the suite — a regression run that silently
+shrinks as flows break is one that reports green while covering less and less.
+
+### The regression oracle
+
+A flow that used to replay and now does not becomes a **high-confidence
+finding** citing when it last worked. That is the memory-based oracle this whole
+design was for: not "this looks wrong to a language model", but "this worked on
+Sunday and does not work today", which is the sentence a QA engineer can act on.
+
+Findings are fingerprinted across sessions, so a nightly report leads with what
+broke **tonight** and files the rest under *known, seen 4× since 2026-09-19*.
+Nothing is ever auto-closed: a finding that stops appearing is not thereby
+fixed, and Magpie will not pretend otherwise.
+
+### Healing, and why healed is not passed
+
+Apps get refactored, and a renamed button should not cost you a whole flow:
+
+```bash
+magpie run --regress all --heal      # costs model calls, up to regress.max_heal_calls
+```
+
+On a failed step Magpie asks the model **once** whether that element still
+exists under a different label. If it does, the step is retried against the new
+target, the flow is patched, and the change is recorded in `heal_events`. If the
+model says the element is genuinely gone, that is a `broken` verdict and the
+flow fails — a real defect reported honestly beats a test quietly repaired.
+
+A healed flow is reported as **HEALED**, demoted to `draft`, and exits `1`:
+healing shows something similar is still on the page, not that the application
+still does what the flow asserts. It earns `verified` back on its next clean,
+heal-free replay.
+
+Healing is off unless you ask for it, never touches a step a guard refused or a
+`{secret}` value, is capped for the whole suite, and never gets a second opinion
+on the same step — a model asked twice will eventually find *something* to
+click.
+
+### Targeting the right element
+
+Flows record **which** of several matching elements was used, so "add the third
+product" replays as the third product rather than the first. Flows recorded
+before this existed still refuse to guess between identical targets; re-run the
+charter once and they learn their positions.
+
+For nightly runs, exit codes and `suite.json`, see
+**[Running Magpie in CI](docs/ci.md)**.
 
 ## Security model
 

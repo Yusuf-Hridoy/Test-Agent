@@ -95,7 +95,7 @@ magpie/
     harness/        budgets, loop detector, checkpoints, scope guard, auth check
     evidence/       step logger, screenshot/trace management, finding builder
     report/         HTML + terminal report generators
-    memory/         db + migrations, page-key normalizer, ingest, replay, planner context
+    memory/         db + migrations, page keys, ingest, replay, regression suite, healer, context
   templates/        report HTML template
   test-projects/    example generated project folder (docs/demo)
   package.json  tsconfig.json  README.md  CLAUDE.md  PHASE-*-BRIEF.md
@@ -160,8 +160,8 @@ A **project folder** (created by `magpie init`, lives anywhere on the user's dis
 |-------|-------------|--------|
 | 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | complete (2026-09-19) |
 | 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | complete (2026-09-23) |
-| 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | **CURRENT** |
-| 4 | Explore mode: coverage matrix, scenario planner, CI integration | pending |
+| 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | complete (2026-09-23) |
+| 4 | Explore mode: coverage matrix, scenario planner, CI integration | **NEXT** (awaiting brief; CI docs already shipped in Phase 3) |
 | 5 | Polish: dashboard, docs site, public launch | pending |
 
 Only the CURRENT phase's brief is authoritative. Do not implement future phases
@@ -213,6 +213,20 @@ early, even partially, unless the brief says to leave a seam for them.
 - 2026-09-23 (P2-T5): `magpie flows verify <slug>` is deliberately a thin alias for `replay` — it promotes only on a real PASS. If `verified` could be set by hand it would be an opinion, and `flows list` would stop being trustworthy.
 - 2026-09-23 (P2-T6): the planner rule about extending known ground lives in `PLANNER_SYSTEM_PROMPT` unconditionally, while the memory briefing is appended to the *user* message only when the project has memory. That keeps the planner `messages` byte-identical to Phase 1 on a first run, which is what the fixture tests assert.
 - 2026-09-23 (P2-T8): acceptance A1 came back partial — the demo session never left `/inventory.html`, so the map held one page. Diagnosed as a faithful record rather than a defect (`form-login` authenticates before the first step is logged, and the badge charter does not navigate); the map reached 5 pages once a navigational charter ran. Logging the login page would mean snapshotting inside `ensureAuthenticated`, which is Phase 1 code and outside this brief.
+
+- 2026-09-23 (P3-T1): recording and replay share one locator module, `src/browser/locate.ts`. Two copies of "how do you find this element again" would drift, and the drift would be silent — a replay clicking the wrong product and reporting green. The recorded index is computed BEFORE the action, because afterwards the page may have re-rendered and the answer would describe a page that no longer exists.
+- 2026-09-23 (P3-T1): `target_nth` is deliberately excluded from a flow's identity signature, and re-ingesting a known flow fills in positions it lacks. Including it would fork every Phase 2 flow into a "-2" twin on the next run; as it is, legacy flows upgrade themselves.
+- 2026-09-23 (P3-T1): migration 002 omits the brief's trailing `UPDATE schema_version SET v = 2` — `migrate()` owns the version, and two writers of the same number is one too many.
+- 2026-09-23 (P3-T2): `--regress <slug>` runs the named flow whatever its status; only `--regress all` applies the verified/draft/broken selection rules. Naming a flow explicitly is a request, not a query.
+- 2026-09-23 (P3-T2, deviation): a suite whose flows were all REFUSED exits 3 (configuration), not 1. A guard refusal is a policy decision about the config, never evidence about the application.
+- 2026-09-23 (P3-T2): one browser context per flow. Isolation beats speed here: a flow that only passes on the previous flow's leftover state must fail in the suite too, not the first time someone runs it alone.
+- 2026-09-23 (P3-T3, deviation): the regression finding is also raised on later runs of a flow already known to have regressed, not only on the run where it first breaks. The brief's wording implies the transition; without the second clause a nightly suite reports a breakage once and then goes quiet, which is how a broken flow becomes invisible. Acceptance B6 depends on this.
+- 2026-09-23 (P3-T3): the performance oracle needed per-session visit data the schema did not carry, so ingestion writes one `page_visit` observation per page per session. Without it, a page that was slow twice and then unvisited for a month would look like an unbroken streak of three.
+- 2026-09-23 (P3-T3): a regression suite is ingested as a session (status `REGRESSION`). Findings reference a session by schema, and a nightly suite's findings are exactly the ones that must be counted across runs.
+- 2026-09-23 (P3-T3): `SuiteFinding.lastPassSession` is resolved by finding the session whose start/end window contains the flow's last-pass timestamp. A standalone `flows replay` belongs to no session, so the field is simply absent — no schema change, and no invented attribution.
+- 2026-09-23 (P3-T4): healing is one call per failed step with no second opinion, even when the relocated target also fails. A model asked twice will eventually find something to click, and "eventually found something" is the failure mode that makes a green regression suite worthless.
+- 2026-09-23 (P3-T4): a healed flow is demoted to `draft` and the suite exits 1. Healing proves something similar is still on the page; it does not prove the application still does what the flow asserts.
+- 2026-09-23 (P3-T6): `init` and `flows delete` now refuse to prompt when stdin is not a TTY. Neither is in the regress path, but a scripted call that hangs forever looks exactly like a job that is still working — failing loudly is the kinder bug.
 
 ## 11. Current status
 
