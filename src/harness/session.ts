@@ -29,6 +29,8 @@ import { Budget, describeBudgetHit } from "./budgets.js";
 import { fingerprint, LoopDetector } from "./loopdetect.js";
 import { classifyActionResult, slowGrace, waitForRecovery } from "./envmon.js";
 import { ensureAuthenticated } from "./auth.js";
+import { ingestIntoMemory, readMemoryContext } from "../memory/record.js";
+import { normalizePageKey } from "../memory/pagekey.js";
 import { isoNow, sleep, stamp, truncate } from "../util.js";
 
 export interface SessionOptions {
@@ -73,6 +75,15 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
   const findings = new FindingBuilder(secrets);
   const flows = new FlowDrafter(path.join(reportDir, "flows.draft.json"), secrets);
   const loop = new LoopDetector();
+  /** page_key → the last snapshot taken there; ingestion reads titles/elements from it. */
+  const pageSnapshots = new Map<string, Snapshot>();
+  /** Every snapshot goes through here so memory sees the pages the agent saw. */
+  const snapshot = async (p: Page) => {
+    const taken = await takeSnapshot(p);
+    const key = normalizePageKey(taken.snap.url);
+    if (key) pageSnapshots.set(key, taken.snap);
+    return taken;
+  };
 
   let objectives: Objective[] = [];
   let status: SessionStatus = "COMPLETED";
@@ -136,7 +147,10 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
     narrate(auth.detail);
 
     // ---- PLANNING --------------------------------------------------------
-    let current = await takeSnapshot(page);
+    let current = await snapshot(page);
+    // What previous sessions learned about this app, if anything (Phase 2).
+    const memory = readMemoryContext(opts.dir, opts.charter);
+    if (memory) narrate("planning with what previous sessions learned about this app");
     try {
       objectives = await planSession({
         charter: opts.charter,
@@ -145,6 +159,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
         usage,
         secrets,
         log: narrate,
+        ...(memory ? { memory } : {}),
         ...(opts.generate ? { generate: opts.generate } : {}),
       });
     } catch (err) {
@@ -452,7 +467,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
           narrate(`  slow page: ${outcome.observation.detail}`);
         }
 
-        current = await takeSnapshot(page);
+        current = await snapshot(page);
         const fp = fingerprint(current.snap);
         const n = budget.countStep();
         const step = stepLog.append({
@@ -473,6 +488,9 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
           flows.record({
             action: call.toolName,
             ...targetOf(call.toolName, call.input, acting.snap),
+            // Where the flow starts matters to replay, and only the pre-action
+            // snapshot knows it — `current` has already moved on.
+            fromUrl: acting.snap.url,
             url: current.snap.url,
           });
         }
@@ -507,7 +525,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
           }
           // Hard Rule 6: nothing observed during an outage is an application bug.
           observe("outage_recovered", env.reason ?? "environment recovered");
-          current = await takeSnapshot(page);
+          current = await snapshot(page);
           history.push("(environment outage — the site was unreachable and then recovered)");
           oracleNotes.push("The environment was briefly unreachable and has recovered. Re-verify the page state before continuing.");
           checkpoint();
@@ -585,11 +603,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
       const hit = budget.hit();
       if (hit) status = "BUDGET_EXHAUSTED";
     }
-    // Redact ONCE, then write and return the same object. Returning the raw one
-    // leaked credentials into the terminal summary and the HTML report even
-    // though session.json was clean — objective descriptions are written by the
-    // planner, which happily quotes whatever it read off the page.
-    const result: SessionResult = secrets.redactDeep({
+    const raw: SessionResult = {
       status,
       startedAt: isoNow(startedAt),
       endedAt: isoNow(),
@@ -600,7 +614,23 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
       usage: usage.snapshot(),
       stepCount: stepLog.count,
       reportDir,
+    };
+    // Memory is written before the result is frozen so a failed ingest can still
+    // append its observation — `observations` is the same array `raw` holds.
+    ingestIntoMemory({
+      dir: opts.dir,
+      result: raw,
+      reportDir,
+      secrets,
+      snapshots: pageSnapshots,
+      narrate,
+      observe,
     });
+    // Redact ONCE, then write and return the same object. Returning the raw one
+    // leaked credentials into the terminal summary and the HTML report even
+    // though session.json was clean — objective descriptions are written by the
+    // planner, which happily quotes whatever it read off the page.
+    const result: SessionResult = secrets.redactDeep(raw);
     fs.writeFileSync(
       path.join(reportDir, "session.json"),
       `${JSON.stringify(result, null, 2)}\n`,

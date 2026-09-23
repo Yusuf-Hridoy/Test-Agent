@@ -7,6 +7,7 @@ import { runSession } from "../session.js";
 import { _resetRateLimiter } from "../../model/ask.js";
 import { writeHtmlReport } from "../../report/html.js";
 import { loadConfig } from "../../config/load.js";
+import { closeDb, counts, flowBySlug, listFlows, openMemoryDb } from "../../memory/db.js";
 import type { SessionResult, StepRecord } from "../../types.js";
 
 /** One scripted model reply. */
@@ -235,6 +236,29 @@ describe("runSession (scripted model, local app)", () => {
         expect(action).not.toHaveProperty("id");
         if (action.target) expect(Object.keys(action.target).sort()).toEqual(["name", "role"]);
       }
+    }
+  });
+
+  it("ingests the run into project memory (P2-T3)", () => {
+    const db = openMemoryDb(dir);
+    try {
+      const c = counts(db);
+      expect(c.sessions).toBe(1);
+      expect(c.pages).toBeGreaterThanOrEqual(3);
+      // Only passed objectives become flows, and O-01 is one of them.
+      const slugs = listFlows(db).map((f) => f.slug);
+      expect(slugs).toContain("enter-the-shop-from-the-landing-page");
+      expect(listFlows(db).every((f) => f.status === "draft")).toBe(true);
+      const flow = flowBySlug(db, "enter-the-shop-from-the-landing-page")!;
+      expect(flow.steps[0]).toMatchObject({
+        action: "click",
+        target_role: "link",
+        target_name: "Enter the shop",
+      });
+      // The flow must know where it starts, or replay has nowhere to go.
+      expect(flow.start_page_key).toMatch(/^127\.0\.0\.1:\d+\/$/);
+    } finally {
+      closeDb(db);
     }
   });
 

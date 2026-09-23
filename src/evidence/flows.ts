@@ -11,6 +11,9 @@ export interface FlowAction {
   action: string;
   target?: { role: string; name: string };
   value?: string;
+  /** The URL the model was looking at when it chose this action. */
+  fromUrl?: string;
+  /** The URL after the action ran. */
   url: string;
 }
 

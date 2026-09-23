@@ -61,3 +61,22 @@ export function renderTerminalReport(args: {
   lines.push(`report    ${args.htmlPath}`);
   return lines.join("\n");
 }
+
+/**
+ * Plain fixed-width table for the memory/flows commands. No colour, no
+ * dependency: output that survives a pipe into a ticket is worth more than
+ * output that looks pretty in one terminal.
+ */
+export function renderTable(headers: string[], rows: string[][], indent = "  "): string {
+  if (!rows.length) return `${indent}(none)`;
+  const widths = headers.map((h, i) =>
+    Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)),
+  );
+  const line = (cells: string[]) =>
+    indent +
+    cells
+      .map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] ?? 0)))
+      .join("  ")
+      .trimEnd();
+  return [line(headers), ...rows.map(line)].join("\n");
+}

@@ -95,7 +95,7 @@ magpie/
     harness/        budgets, loop detector, checkpoints, scope guard, auth check
     evidence/       step logger, screenshot/trace management, finding builder
     report/         HTML + terminal report generators
-    memory/         (empty until Phase 2)
+    memory/         db + migrations, page-key normalizer, ingest, replay, planner context
   templates/        report HTML template
   test-projects/    example generated project folder (docs/demo)
   package.json  tsconfig.json  README.md  CLAUDE.md  PHASE-*-BRIEF.md
@@ -158,9 +158,9 @@ A **project folder** (created by `magpie init`, lives anywhere on the user's dis
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | **CURRENT** |
-| 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | pending |
-| 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | pending |
+| 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | complete (2026-09-19) |
+| 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | complete (2026-09-23) |
+| 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | **NEXT** (awaiting brief) |
 | 4 | Explore mode: coverage matrix, scenario planner, CI integration | pending |
 | 5 | Polish: dashboard, docs site, public launch | pending |
 
@@ -202,13 +202,31 @@ early, even partially, unless the brief says to leave a seam for them.
 - 2026-09-19 (acceptance S3): a dead server parks Chromium on `chrome-error://chromewebdata/`, which the scope guard read as an out-of-scope navigation and "corrected" by navigating back — so an outage was silently reclassified as a scope violation and the objective was wrongly blocked. Browser error pages are now reported as navigation failures carrying `net::ERR_FAILED`, which the environment classifier recognises.
 - 2026-09-19 (acceptance S3/S4): `askModel` distinguishes connection failures from quota/auth failures (`ModelExhaustedError.networkFailure`), and the harness finalizes ENVIRONMENT_DOWN — after the normal recovery window — when no provider is reachable. Without this a real Wi-Fi outage ended the session as BUDGET_EXHAUSTED, because the model call fails before any browser action can be classified. Provider-unreachable-but-app-up is also bounded, instead of spinning the step budget on a retry that cannot help.
 
+- 2026-09-23 (P2-T1): `src/memory/db.ts` holds the shared typed queries as well as open/migrate/close. Ingest, replay, the CLI and the planner context all need the same handful of reads; a separate store module would only have forwarded to this one.
+- 2026-09-23 (P2-T2): a path segment counts as an id when it is purely numeric, a UUID, ≥16 chars of hex, **or** ≥16 chars of base64url that contains both a digit and an uppercase letter. The last clause is the deviation worth knowing: length alone would collapse readable slugs (`add-cheapest-item-to-cart`, `2026-09-18-release-notes`) to `:id` and the app map would lose exactly the pages a tester cares about. Real opaque ids (ULIDs, Stripe keys, base64url tokens) carry both.
+- 2026-09-23 (P2-T3): `FlowAction` gained `fromUrl` (the pre-action URL). The draft only recorded the URL *after* each action, so a flow's start page was unknowable — and replay has to begin somewhere. Drafts written before this change still ingest; their `start_page_key` is the first action's post-action URL, i.e. approximate.
+- 2026-09-23 (P2-T3): ingestion is idempotent **by report directory** — a run already in `sessions` is skipped whole. Upserting instead would keep row counts stable but silently double `visit_count` on every re-ingest, which is the number the planner ranks pages by.
+- 2026-09-23 (P2-T3): `visit_count` counts *arrivals*, not steps. A page the agent poked at twenty times is not twenty times more interesting than one it saw once.
+- 2026-09-23 (P2-T4, replay-semantics deviation): a **guard refusal** records `refused@<seq>` and leaves the flow's status untouched, where the brief says a FAIL flips it to `broken`. Adding an element to `forbidden_elements` says nothing about the application, and marking the flow broken would read as a regression in the app under test. A refusal exits 3 (configuration), not 1 (failed test).
+- 2026-09-23 (P2-T4): target resolution tries exact name, then substring, then text, before declaring 0-or->1 a failure. Exact-first is a refinement of §1.4, not a relaxation: it removes *false* ambiguity (a "Cart" target also matching "Add to cart") without ever choosing between genuine matches.
+- 2026-09-23 (P2-T4): exit code 1 added for a failed replay (Phase 1 defined 0 ran / 2 environment / 3 config). CI has to be able to see a broken flow, and a failed test is not an environment problem.
+- 2026-09-23 (P2-T5): `magpie flows verify <slug>` is deliberately a thin alias for `replay` — it promotes only on a real PASS. If `verified` could be set by hand it would be an opinion, and `flows list` would stop being trustworthy.
+- 2026-09-23 (P2-T6): the planner rule about extending known ground lives in `PLANNER_SYSTEM_PROMPT` unconditionally, while the memory briefing is appended to the *user* message only when the project has memory. That keeps the planner `messages` byte-identical to Phase 1 on a first run, which is what the fixture tests assert.
+- 2026-09-23 (P2-T8): acceptance A1 came back partial — the demo session never left `/inventory.html`, so the map held one page. Diagnosed as a faithful record rather than a defect (`form-login` authenticates before the first step is logged, and the badge charter does not navigate); the map reached 5 pages once a navigational charter ran. Logging the login page would mean snapshotting inside `ensureAuthenticated`, which is Phase 1 code and outside this brief.
+
 ## 11. Current status
 
-- Phase: 1 — **acceptance passed 2026-09-19**. Next: await PHASE-2-BRIEF.md. Do NOT start Phase 2.
+- Phase: 2 — **complete, acceptance run 2026-09-23** on branch `phase-2`. Brief + Run Log: PHASE-2-BRIEF.md. Next: await PHASE-3-BRIEF.md. Do NOT start Phase 3.
+- Scenario results: **A2–A7 PASS**. **A1 PARTIAL** — `pages=1` instead of ≥3 because every objective of the demo charter ran on `/inventory.html`; diagnosed in the Run Log as a faithful record, not a defect (the map reached 5 pages / 4 transitions under a navigational charter).
+- What works, measured live against www.saucedemo.com: three sessions ingested (≈73 Gemini requests total); a 4-step checkout-form flow recorded by the agent **replays in 2.0 s with zero model calls**; a flow broken on purpose fails at the exact step with screenshot, trace and all-zero usage; the third session's planner referenced a finding remembered from the first. 194 tests green, build clean.
+- Known limitation, top candidate for Phase 3: **ambiguous targets**. `flow_steps` records role + accessible name only, so "add *this* item" on a catalogue page (six identical "Add to cart" buttons on saucedemo) cannot be replayed and fails by design. The fix is fidelity, not healing — record which of the N matches was acted on (`target_nth`, migration 002).
+
+### Phase 1 (complete 2026-09-19), for reference
+
 - Scenario results: **S0, S1, S2, S5, S6, S7, S8 PASS** as specified. **S3, S4 PASS by simulation** — a local server made unreachable on cue (state preserved) standing in for the Wi-Fi toggle, which no agent can perform. S7's `git status` half is N/A: the user chose to skip `git init`.
 - Live running found and fixed **19 real defects**; PHASE-1-ACCEPTANCE-BRIEF.md carries the per-scenario Run Log with root causes. 141 tests green, build clean.
 - Outstanding, by choice rather than blockage:
   - The literal Wi-Fi-toggle runs of S3/S4 (~5 min by hand) — projects prepared at `test-projects/s3-transient` / `s4-sustained`. The simulation covers the same code paths; the untested delta is the LLM provider being unreachable at the same time, which is covered by `src/harness/__tests__/outage.test.ts` instead.
-  - The repo is not under git, so no per-scenario commits were made and the whole phase is uncommitted.
+  - No per-scenario commits exist: git was initialised after acceptance, so all of Phase 1 landed in a single `first commit`.
 - Model note: `gemini-2.5-flash` is retired for new keys; `gemini-3.6-flash` allows 20 requests/day on the free tier. Pinned default is `gemini-3.1-flash-lite` (tools + vision, ~1.5s, own quota bucket). Groq `openai/gpt-oss-120b` is the verified fallback and has no vision, which exercises the screenshot-degradation path.
 - Known issues: `npm audit` undici advisories via `@ai-sdk/provider-utils` (fix needs ai v6, pinned away by CLAUDE.md §4).

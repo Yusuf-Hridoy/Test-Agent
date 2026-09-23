@@ -67,13 +67,15 @@ export async function planSession(args: {
   usage: UsageTracker;
   secrets: SecretStore;
   log?: (line: string) => void;
+  /** App briefing from project memory (Phase 2); absent on a first run. */
+  memory?: string;
   /** Test seam, mirroring askModel's. */
   generate?: GenerateFn;
 }): Promise<Objective[]> {
   const { charter, snapshot, cfg, usage, secrets } = args;
   const log = args.log ?? (() => {});
   const messages = [
-    { role: "user" as const, content: plannerUserMessage(charter, snapshot) },
+    { role: "user" as const, content: plannerUserMessage(charter, snapshot, args.memory) },
   ];
 
   for (let attempt = 0; attempt < 2; attempt++) {
