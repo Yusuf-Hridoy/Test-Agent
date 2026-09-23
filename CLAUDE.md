@@ -160,7 +160,7 @@ A **project folder** (created by `magpie init`, lives anywhere on the user's dis
 |-------|-------------|--------|
 | 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | complete (2026-09-19) |
 | 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | complete (2026-09-23) |
-| 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | **NEXT** (awaiting brief) |
+| 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | **CURRENT** |
 | 4 | Explore mode: coverage matrix, scenario planner, CI integration | pending |
 | 5 | Polish: dashboard, docs site, public launch | pending |
 
@@ -216,7 +216,8 @@ early, even partially, unless the brief says to leave a seam for them.
 
 ## 11. Current status
 
-- Phase: 2 — **complete, acceptance run 2026-09-23**, merged to `main` the same day (PR #1); the per-task `P2-Tn:` commits are unsquashed on main. Brief + Run Log: PHASE-2-BRIEF.md. Next: await PHASE-3-BRIEF.md. Do NOT start Phase 3.
+- Phase: 3 — **in progress**, started 2026-09-23 on branch `phase-3`. Brief: PHASE-3-BRIEF.md (in the repo).
+- Phase 2 — complete, acceptance run 2026-09-23, merged to `main` the same day (PR #1); the per-task `P2-Tn:` commits are unsquashed on main. Brief + Run Log: PHASE-2-BRIEF.md.
 - Scenario results: **A2–A7 PASS**. **A1 PARTIAL** — `pages=1` instead of ≥3 because every objective of the demo charter ran on `/inventory.html`; diagnosed in the Run Log as a faithful record, not a defect (the map reached 5 pages / 4 transitions under a navigational charter).
 - What works, measured live against www.saucedemo.com: three sessions ingested (≈73 Gemini requests total); a 4-step checkout-form flow recorded by the agent **replays in 2.0 s with zero model calls**; a flow broken on purpose fails at the exact step with screenshot, trace and all-zero usage; the third session's planner referenced a finding remembered from the first. 194 tests green, build clean.
 - Known limitation, top candidate for Phase 3: **ambiguous targets**. `flow_steps` records role + accessible name only, so "add *this* item" on a catalogue page (six identical "Add to cart" buttons on saucedemo) cannot be replayed and fails by design. The fix is fidelity, not healing — record which of the N matches was acted on (`target_nth`, migration 002).
