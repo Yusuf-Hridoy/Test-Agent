@@ -32,8 +32,12 @@ program
 
 program
   .command("run")
-  .description("Run an instructed test session against the application")
-  .requiredOption("--charter <string>", "what the agent should test")
+  .description("Run an instructed test session, or replay remembered flows")
+  .option("--charter <string>", "what the agent should test")
+  .option("--regress <slug|all>", "replay remembered flows instead of exploring")
+  .option("--include-draft", "with --regress all, also replay draft flows")
+  .option("--heal", "let the model relocate a failed step (costs model calls)")
+  .option("--json", "with --regress, print suite.json to stdout and logs to stderr")
   .option("--as <name>", "auth profile name", "default")
   .option("--headed", "show the browser window")
   .option("--dir <dir>", "project directory (default: current directory)")

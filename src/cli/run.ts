@@ -8,7 +8,12 @@ import { writeHtmlReport } from "../report/html.js";
 import { renderTerminalReport } from "../report/terminal.js";
 
 export interface RunOptions {
-  charter: string;
+  charter?: string;
+  /** A flow slug or "all" — switches `run` into regression mode (Phase 3). */
+  regress?: string;
+  includeDraft?: boolean;
+  heal?: boolean;
+  json?: boolean;
   as?: string;
   headed?: boolean;
   dir?: string;
@@ -58,6 +63,14 @@ function providerSummary(result: SessionResult): string {
 }
 
 export async function runCommand(opts: RunOptions): Promise<void> {
+  if (opts.regress) {
+    if (opts.charter) {
+      throw new ConfigError("Use either --charter (explore) or --regress (replay), not both.");
+    }
+    const { regressCommand } = await import("./regress.js");
+    return regressCommand(opts);
+  }
+
   const dir = opts.dir ?? process.cwd();
   const charter = opts.charter?.trim();
   if (!charter) throw new ConfigError("--charter is required and must not be empty.");

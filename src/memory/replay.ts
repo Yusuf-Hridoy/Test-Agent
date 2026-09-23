@@ -46,6 +46,12 @@ export interface ReplayResult {
   reason?: string;
   /** True when a Magpie guard stopped the replay — not evidence about the app. */
   refused?: boolean;
+  /**
+   * The application could not be reached at all. Hard Rule 6: that is an
+   * environment problem, and a suite must stop rather than file N false
+   * regressions against an app that is simply down.
+   */
+  environmentDown?: boolean;
   stepsRun: number;
   stepsTotal: number;
   reportDir: string;
@@ -182,6 +188,7 @@ export async function replayFlow(
     passed: !failure,
     ...(failure ? { failedAt: failure.seq, reason: failure.reason } : {}),
     ...(failure?.refused ? { refused: true } : {}),
+    ...(failure && !failure.refused && looksLikeOutage(failure.reason) ? { environmentDown: true } : {}),
     stepsRun,
     stepsTotal: flow.steps.length,
     reportDir,
@@ -210,6 +217,11 @@ function recordOutcome(db: MemoryDb, flow: StoredFlow, result: ReplayResult): vo
   }
   if (result.passed) {
     recordReplay(db, flow.id, "pass", "verified", now);
+    return;
+  }
+  // An unreachable app says nothing about the flow either (Hard Rule 6).
+  if (result.environmentDown) {
+    recordReplay(db, flow.id, `environment@${result.failedAt}`, flow.status, now);
     return;
   }
   recordReplay(db, flow.id, `fail@${result.failedAt}`, "broken", now);
@@ -335,6 +347,14 @@ function position(step: FlowStepRow): string {
   return step.target_nth === null || step.target_nth === undefined || step.target_nth === 0
     ? ""
     : ` (match ${step.target_nth + 1})`;
+}
+
+/**
+ * Hard Rule 6, at replay scale: a connection error is the environment talking,
+ * never the application failing a test.
+ */
+export function looksLikeOutage(reason: string): boolean {
+  return /net::ERR_|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ERR_CONNECTION|chrome-error:\/\//i.test(reason);
 }
 
 function firstLine(err: unknown): string {
