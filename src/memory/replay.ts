@@ -150,6 +150,8 @@ export async function replayFlow(
     for (const step of flow.steps) {
       if (failure) break;
       let outcome = await runStep(page, cfg, step);
+      // What actually ran: the recorded step, or the healed version of it.
+      let effective = step;
 
       // ---- healing (§1.6) ------------------------------------------------
       if (!outcome.ok && canHeal(opts, outcome, step)) {
@@ -182,6 +184,7 @@ export async function replayFlow(
             patches.push(patched);
             narrate(`  [${step.seq}/${flow.steps.length}] healed: ${describeTarget(step)} → ${describeTarget(patched)}`);
             outcome = retry;
+            effective = patched;
           } else {
             // No second opinion on the same step (§1.6).
             healNote = `${verdict.note}; the relocated target also failed: ${retry.detail}`;
@@ -193,7 +196,9 @@ export async function replayFlow(
 
       stepsRun++;
       log(step.seq, step.action, outcome.ok, outcome.detail, page.url());
-      narrate(`  [${step.seq}/${flow.steps.length}] ${describe(step)} → ${outcome.ok ? "OK" : "FAILED"}`);
+      // Describe what ran, not what was recorded: after a heal, printing the old
+      // target reads as though the target that just failed had worked.
+      narrate(`  [${step.seq}/${flow.steps.length}] ${describe(effective)} → ${outcome.ok ? "OK" : "FAILED"}`);
       if (!outcome.ok) {
         failure = {
           seq: step.seq,
