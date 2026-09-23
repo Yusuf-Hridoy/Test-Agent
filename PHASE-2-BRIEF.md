@@ -213,11 +213,47 @@ Fill a Run Log table (scenario, result, attempts, fix) in this file, as in
 Phase 1. Same escalation rule: 3 failed fix attempts on one scenario → stop and
 write a diagnosis. Track Gemini requests spent; pause if daily quota nears.
 
+## 2b. Run Log (P2-T8, self-run 2026-09-23)
+
+Project: `/tmp/p2acc` (fresh `npm run demo` against www.saucedemo.com, then two
+further charters). Gemini requests spent across the whole acceptance: **≈73**
+(28 + 13 + ~5 aborted + 27), all on `gemini-3.1-flash-lite`; no quota error.
+
+| # | Result | Attempts | What happened / fix |
+|---|--------|----------|---------------------|
+| A1 | **PARTIAL** | 1 | sessions=1 ✓, flows 3 draft ✓, **pages=1, not ≥3** ✗. Not a defect: every one of the demo's six objectives ran on `/inventory.html`, so one page is a faithful record of the session. Two contributing facts, both by design — `form-login` authenticates *before* the first step is logged, so the login page never enters `steps.jsonl`; and the badge-add/remove charter never navigates. The map reached 5 pages and 4 transitions once a navigational charter ran (A3). No code change: recording pages from the step log is exactly §1.3/T3, and logging the login page would mean snapshotting inside `ensureAuthenticated` — Phase 1 territory, out of this brief's scope. |
+| A2 | **PASS** | 1 | `flows replay sort-the-product-catalog-by-price-low-to` → PASS in 1.8 s, terminal shows `LLM requests: 0`, flow draft→verified. Repeated with the 4-step flow `enter-valid-first-name-last-name-and-zip` (fill First/Last/Zip, click Continue): PASS in **2.0 s, zero model calls** — the same ground the recording session spent 27 calls to discover. |
+| A3 | **PASS** | 2 | Run narrates `planning with what previous sessions learned about this app`; objective O-03 came back as *"Verify the cart page displays the added item rather than the product catalog, **addressing the known high-severity finding**"* — memory-derived, referencing ground a previous session covered. Session COMPLETED, exit 0, 27 calls. First attempt was killed by my own `\| head -25` (SIGPIPE on the child), not by the product; re-run to a log file, clean. |
+| A4 | **PASS** | 1 | Built a 3-step flow in the DB with a nonsense `target_name` at seq 2. Replay ran step 1, failed at **step 2/3** (`no element matched button "Add to cart (Sauce Labs Onesie)" after 5s`), flow → `broken`, `last_replay_result = fail@2`, exit 1. Evidence folder holds `steps.jsonl`, `001_fail-step-2.png`, `trace.zip` (501 KB) and `replay.json` with all-zero usage. |
+| A5 | **PASS** | 1 | `flows delete … -y` removed both broken flows; `SELECT COUNT(*) FROM flow_steps WHERE flow_id NOT IN (SELECT id FROM flows)` → 0 (the FK cascade works because `foreign_keys` is pragma'd ON); `memory stats` consistent at 6 flows. |
+| A6 | **PASS** | 1 | `strings` over `magpie.db`, `-wal` and `-shm`: `secret_sauce` 0 hits, first 8 chars of the real Gemini key 0 hits, first 8 of the Groq key 0 hits, `«redacted»` 0 hits. `magpie memory show` output likewise clean. |
+| A7 | **PASS** | 1 | 194 tests green, `tsc` build clean. Phase-1-era report folders (`test-projects/s1-demo`, whose `flows.draft.json` predates `fromUrl`) ingest without modification — 2 sessions, 4 pages, 8 transitions, 6 flows. Run mode itself was exercised live three times during A1/A3 with no regression. |
+
+### Findings from acceptance (not scenario failures)
+
+1. **Ambiguous targets make a catalogue's most valuable flows unreplayable.**
+   `flows replay verify-the-cart-badge-icon-displays-the-` fails with *"6 elements
+   matched text="Add to cart" after 5s"*: saucedemo's six products all expose the
+   same accessible name, and role+name is all `flow_steps` records. §1.4 says
+   ambiguity is a failure and healing is Phase 3, so the behaviour is exactly as
+   specified — but the limitation is structural, not incidental: on any list or
+   catalogue page, "add *this* item" cannot be replayed. The fix is fidelity, not
+   healing — record which of the N matches the model acted on (a `target_nth`
+   column in migration 002) — and it is the first thing Phase 3 should take.
+2. **State-dependent target names break replay legitimately.**
+   `click-the-cart-icon…` recorded the target `"Cart, 1 items"`; replayed against
+   an empty cart the link is named `"Cart"`, so the step fails. Correct
+   behaviour (the flow genuinely depends on prior state) and a good argument for
+   flows that carry their own setup steps rather than starting mid-state.
+3. **Old flows carry an approximate start page.** Drafts recorded before this
+   phase have no `fromUrl`, so `start_page_key` falls back to the first action's
+   *post*-action URL. Flows recorded from now on are exact.
+
 ## 3. Completion checklist
-- [ ] P2-T1…T7 done, per-task commits on `phase-2`
-- [ ] A1–A7 pass, Run Log filled
-- [ ] `git log --oneline` on the branch reads as a reviewable story
-- [ ] CLAUDE.md: Phase 2 COMPLETE + decision log entries (incl. any schema or
-      replay-semantics deviations, with reasons)
-- [ ] Short handoff message to the user: what memory now does, one command to
-      see it (`magpie memory show`), anything deferred
+- [x] P2-T1…T7 done, per-task commits on `phase-2`
+- [x] A1–A7 run, Run Log filled — A2–A7 pass, **A1 partial** (pages=1 not ≥3;
+      diagnosed above as a faithful record of a single-page session, not a defect)
+- [x] `git log --oneline` on the branch reads as a reviewable story
+- [x] CLAUDE.md: Phase 2 status + decision log entries (incl. the replay-semantics
+      deviations, with reasons)
+- [x] Short handoff message to the user

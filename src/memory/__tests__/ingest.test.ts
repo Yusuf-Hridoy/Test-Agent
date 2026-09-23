@@ -277,6 +277,22 @@ describe("ingestSession", () => {
     closeDb(db);
   });
 
+  it("ingests a Phase-1-era report whose draft actions carry no fromUrl", () => {
+    const { dir, reportDir, result } = writeFixture();
+    // Phase 1 wrote {action, target, value, url} and nothing else.
+    const drafts = JSON.parse(fs.readFileSync(path.join(reportDir, "flows.draft.json"), "utf8"));
+    for (const d of drafts) for (const a of d.actions) delete a.fromUrl;
+    fs.writeFileSync(path.join(reportDir, "flows.draft.json"), JSON.stringify(drafts));
+
+    const db = openMemoryDb(dir);
+    const summary = ingestSession(db, result, reportDir, { secrets: new SecretStore([PASSWORD]) });
+    expect(summary.flowsCreated).toContain("log-in-with-valid-credentials");
+    // Without fromUrl the best available guess is the first action's own URL:
+    // approximate for old evidence, exact for anything recorded from now on.
+    expect(flowBySlug(db, "log-in-with-valid-credentials")!.start_page_key).toBe("shop.test/");
+    closeDb(db);
+  });
+
   it("survives a report folder with no steps and no drafts", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "magpie-ingest-empty-"));
     dirs.push(dir);
