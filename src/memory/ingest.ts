@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PROVIDERS, type SessionResult, type Snapshot, type StepRecord } from "../types.js";
+import {
+  PROVIDERS,
+  type MagpieConfig,
+  type SessionResult,
+  type Snapshot,
+  type StepRecord,
+} from "../types.js";
+import { isUrlInScope } from "../browser/guard.js";
 import { REDACTED, type SecretStore } from "../model/redact.js";
 import type { DraftFlow, FlowAction } from "../evidence/flows.js";
 import { isoNow, slug, truncate } from "../util.js";
@@ -17,6 +24,12 @@ export interface IngestOptions {
   secrets?: SecretStore;
   /** page_key → the last snapshot taken on that page, for titles and elements. */
   snapshots?: Map<string, Snapshot>;
+  /**
+   * Needed to judge whether a linked page belongs to the app under test.
+   * Without it the frontier is left alone: guessing scope would put somebody
+   * else's website on Magpie's crawl queue (Hard Rule 4).
+   */
+  cfg?: MagpieConfig;
 }
 
 export interface IngestResult {
@@ -151,6 +164,14 @@ export function ingestSession(
     // because "this page was slow" survives the session that noticed it.
     recordObservations(db, sessionId, result.observations ?? [], visits, now, clean);
     const raised = raisePerformanceFindings(db, sessionId, visits, now);
+
+    recordCoverage(db, {
+      visits,
+      steps,
+      snapshots: opts.snapshots,
+      ...(opts.cfg ? { cfg: opts.cfg } : {}),
+      now,
+    });
 
     const flowsCreated: string[] = [];
     const flowsSkipped: string[] = [];
@@ -611,4 +632,95 @@ export function ingestSuite(
     );
     return { sessionId, verdicts, alreadyIngested: false };
   })();
+}
+
+
+// ---------------------------------------------------------------------------
+// Frontier and element coverage (Phase 4 §1.2)
+// ---------------------------------------------------------------------------
+
+interface CoverageInput {
+  visits: Visit[];
+  steps: StepRecord[];
+  snapshots?: Map<string, Snapshot>;
+  cfg?: MagpieConfig;
+  now: string;
+}
+
+/**
+ * Record what this session saw and what it actually touched.
+ *
+ * Runs for every session, not just explore: a charter run discovers pages and
+ * leaves elements untouched exactly like an exploratory one, and coverage that
+ * only counted explore runs would understate what is already tested.
+ */
+export function recordCoverage(db: MemoryDb, input: CoverageInput): void {
+  const seen = db.prepare(
+    `INSERT INTO element_seen (page_key, role, name, first_seen, last_seen, interactions)
+     VALUES (?,?,?,?,?,0)
+     ON CONFLICT(page_key, role, name) DO UPDATE SET last_seen = excluded.last_seen`,
+  );
+  const touch = db.prepare(
+    `INSERT INTO element_seen (page_key, role, name, first_seen, last_seen, interactions)
+     VALUES (?,?,?,?,?,1)
+     ON CONFLICT(page_key, role, name) DO UPDATE SET
+       last_seen = excluded.last_seen,
+       interactions = element_seen.interactions + 1`,
+  );
+
+  for (const [pageKey, snap] of input.snapshots ?? []) {
+    for (const el of snap.elements) {
+      // A nameless element cannot be a coverage target — nothing could ever
+      // say "this one was exercised" about it.
+      if (!el.name?.trim()) continue;
+      seen.run(pageKey, el.role, el.name, input.now, input.now);
+    }
+  }
+
+  for (const step of input.steps) {
+    if (!step.target?.name?.trim()) continue;
+    const pageKey = normalizePageKey(step.url);
+    if (!pageKey) continue;
+    touch.run(pageKey, step.target.role, step.target.name, input.now, input.now);
+  }
+
+  recordFrontier(db, input);
+}
+
+/**
+ * Links to pages nobody has opened yet. Scope is applied here as strictly as it
+ * is in the browser: a link to somebody else's site is not a page of the
+ * application, and must never end up on the explorer's queue.
+ */
+function recordFrontier(db: MemoryDb, input: CoverageInput): void {
+  const visitedKeys = new Set(input.visits.map((v) => v.key));
+  const known = new Set(
+    (db.prepare("SELECT page_key FROM pages").all() as { page_key: string }[]).map(
+      (r) => r.page_key,
+    ),
+  );
+
+  if (input.cfg && input.snapshots) {
+    const add = db.prepare(
+      `INSERT INTO frontier (page_key, sample_url, first_seen, seen_on_page)
+       VALUES (?,?,?,?)
+       ON CONFLICT(page_key) DO NOTHING`,
+    );
+    for (const [pageKey, snap] of input.snapshots) {
+      for (const el of snap.elements) {
+        if (!el.href) continue;
+        if (!isUrlInScope(el.href, input.cfg)) continue;
+        const key = normalizePageKey(el.href);
+        if (!key || key === pageKey || known.has(key)) continue;
+        add.run(key, el.href, input.now, pageKey);
+      }
+    }
+  }
+
+  // A page that made it into `pages` is no longer frontier, however it was
+  // reached — by following the link, by a charter, or by a direct goto.
+  const visit = db.prepare(
+    "UPDATE frontier SET visited_at = ? WHERE page_key = ? AND visited_at IS NULL",
+  );
+  for (const key of visitedKeys) visit.run(input.now, key);
 }

@@ -3,8 +3,10 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { projectPaths } from "../config/load.js";
 import type {
+  ElementSeenRow,
   FindingRow,
   FlowRow,
+  FrontierRow,
   FlowStatus,
   FlowStepRow,
   PageRow,
@@ -15,7 +17,7 @@ import type {
 export type MemoryDb = Database.Database;
 
 export const DB_FILENAME = "magpie.db";
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Migrations are numbered SQL strings applied in order at open. Never edit one
@@ -95,6 +97,22 @@ export const MIGRATIONS: string[] = [
     seq INTEGER NOT NULL, old_target TEXT NOT NULL, new_target TEXT NOT NULL,
     model_note TEXT, session_ref TEXT, created_at TEXT NOT NULL);
   CREATE INDEX idx_findings_fingerprint ON findings(fingerprint);
+  `,
+  // 003 — PHASE-4-BRIEF §1.2. What the app map is missing: pages Magpie has
+  // been told about but never opened, and which elements it has actually used.
+  `
+  CREATE TABLE frontier (
+    page_key TEXT PRIMARY KEY, sample_url TEXT NOT NULL,
+    first_seen TEXT NOT NULL, seen_on_page TEXT,
+    visited_at TEXT
+  );
+  CREATE TABLE element_seen (
+    page_key TEXT NOT NULL, role TEXT NOT NULL, name TEXT NOT NULL,
+    first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+    interactions INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (page_key, role, name)
+  );
+  CREATE INDEX idx_frontier_open ON frontier(visited_at);
   `,
 ];
 
@@ -294,4 +312,67 @@ export function firstFindingByFingerprint(
        WHERE f.fingerprint = ? ORDER BY f.id LIMIT 1`,
     )
     .get(fingerprint) as (FindingRow & { session_started_at: string | null }) | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Frontier and element coverage (Phase 4)
+// ---------------------------------------------------------------------------
+
+/** Pages linked from somewhere Magpie has been, but never opened. */
+export function openFrontier(db: MemoryDb, limit?: number): FrontierRow[] {
+  const sql =
+    "SELECT * FROM frontier WHERE visited_at IS NULL ORDER BY first_seen, page_key" +
+    (limit === undefined ? "" : " LIMIT ?");
+  return (limit === undefined ? db.prepare(sql).all() : db.prepare(sql).all(limit)) as FrontierRow[];
+}
+
+export function elementsSeenOn(db: MemoryDb, pageKey: string): ElementSeenRow[] {
+  return db
+    .prepare("SELECT * FROM element_seen WHERE page_key = ? ORDER BY role, name")
+    .all(pageKey) as ElementSeenRow[];
+}
+
+export interface PageCoverage {
+  page_key: string;
+  title: string | null;
+  seen: number;
+  interacted: number;
+  /** interacted ÷ seen, or 1 for a page with nothing to interact with. */
+  ratio: number;
+  flows: number;
+}
+
+/**
+ * Per-page element coverage. Pages with nothing interactive score 1: a page
+ * that offers nothing cannot be under-explored, and ranking it worst would
+ * send the explorer back to it forever.
+ */
+export function pageCoverage(db: MemoryDb): PageCoverage[] {
+  const rows = db
+    .prepare(
+      `SELECT p.page_key AS page_key, p.title AS title,
+              COUNT(e.name) AS seen,
+              COALESCE(SUM(CASE WHEN e.interactions > 0 THEN 1 ELSE 0 END), 0) AS interacted
+       FROM pages p LEFT JOIN element_seen e ON e.page_key = p.page_key
+       GROUP BY p.page_key, p.title`,
+    )
+    .all() as { page_key: string; title: string | null; seen: number; interacted: number }[];
+
+  const flowCounts = new Map<string, number>();
+  for (const row of db
+    .prepare(
+      `SELECT s.url_after AS page_key, COUNT(DISTINCT f.id) AS n
+       FROM flows f JOIN flow_steps s ON s.flow_id = f.id
+       WHERE f.status = 'verified' AND s.url_after IS NOT NULL
+       GROUP BY s.url_after`,
+    )
+    .all() as { page_key: string; n: number }[]) {
+    flowCounts.set(row.page_key, row.n);
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    ratio: r.seen === 0 ? 1 : r.interacted / r.seen,
+    flows: flowCounts.get(r.page_key) ?? 0,
+  }));
 }

@@ -1,4 +1,4 @@
-import type { SessionResult, Snapshot } from "../types.js";
+import type { MagpieConfig, SessionResult, Snapshot } from "../types.js";
 import type { SecretStore } from "../model/redact.js";
 import { closeDb, openMemoryDb, type MemoryDb } from "./db.js";
 import { ingestSession } from "./ingest.js";
@@ -10,6 +10,8 @@ export interface RecordArgs {
   reportDir: string;
   secrets: SecretStore;
   snapshots: Map<string, Snapshot>;
+  /** Scope rules, so a linked page can be judged in or out of the app. */
+  cfg?: MagpieConfig;
   narrate?: (line: string) => void;
   observe?: (type: string, detail: string) => void;
 }
@@ -29,6 +31,7 @@ export function ingestIntoMemory(args: RecordArgs): void {
     const summary = ingestSession(db, args.result, args.reportDir, {
       secrets: args.secrets,
       snapshots: args.snapshots,
+      ...(args.cfg ? { cfg: args.cfg } : {}),
     });
     if (summary.alreadyIngested) return;
 

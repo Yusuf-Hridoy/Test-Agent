@@ -41,6 +41,11 @@ export interface ElementRef {
   tag: string;
   value?: string;
   disabled?: boolean;
+  /**
+   * Absolute href, for anchors only. Never rendered into a prompt — it exists
+   * so memory can learn which pages exist without visiting them (the frontier).
+   */
+  href?: string;
 }
 
 /** pageText is truncated to 2000 chars by the snapshotter. */
@@ -62,6 +67,11 @@ export interface StepRecord {
   result: { ok: boolean; detail?: string };
   url: string;
   fingerprint: string;
+  /**
+   * The element this step acted on, by role and accessible name. Snapshot ids
+   * die with the session; this survives, and is what element coverage counts.
+   */
+  target?: { role: string; name: string };
 }
 
 export type Oracle =

@@ -128,3 +128,24 @@ export interface HealEventRow {
 export interface StoredFlow extends FlowRow {
   steps: FlowStepRow[];
 }
+
+/** A page Magpie knows exists because something linked to it (Phase 4). */
+export interface FrontierRow {
+  page_key: string;
+  sample_url: string;
+  first_seen: string;
+  /** page_key of the page the link was found on. */
+  seen_on_page: string | null;
+  /** NULL while the page is still unvisited. */
+  visited_at: string | null;
+}
+
+/** One element on one page, and how often Magpie has actually used it. */
+export interface ElementSeenRow {
+  page_key: string;
+  role: string;
+  name: string;
+  first_seen: string;
+  last_seen: string;
+  interactions: number;
+}

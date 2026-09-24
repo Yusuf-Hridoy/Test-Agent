@@ -105,6 +105,12 @@ export async function takeSnapshot(page: Page): Promise<SnapshotResult> {
             : undefined;
         const value =
           type === "password" ? undefined : rawValue ? rawValue.slice(0, maxName) : undefined;
+        // `href` on an anchor is already absolute in the DOM, and only anchors
+        // tell memory about pages nobody has visited yet.
+        const href =
+          tag === "a" && (el as HTMLAnchorElement).href
+            ? (el as HTMLAnchorElement).href
+            : undefined;
         return {
           index,
           el,
@@ -116,6 +122,7 @@ export async function takeSnapshot(page: Page): Promise<SnapshotResult> {
             tag: type ? `${tag}[${type}]` : tag,
             ...(value ? { value } : {}),
             ...((el as HTMLInputElement).disabled ? { disabled: true } : {}),
+            ...(href ? { href } : {}),
           },
         };
       });

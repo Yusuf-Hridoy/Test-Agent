@@ -53,6 +53,7 @@ export async function startFakeApp(fixedPort = 0): Promise<FakeApp> {
             <button id="add" onclick="document.getElementById('badge').textContent='cart: 1'">${addLabel}</button>
             <a href="/broken">Broken page</a>
             <button onclick="fetch('/api/boom')">Check out</button>
+            <a href="https://example.com/outside">Our partner site</a>
             <a href="/logout">Logout</a>`),
         );
         return;

@@ -480,6 +480,9 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
         current = await snapshot(page);
         const fp = fingerprint(current.snap);
         const n = budget.countStep();
+        // The element by role+name, not just the snapshot id: ids die with the
+        // session, and element coverage has to survive it.
+        const acted = targetOf(call.toolName, call.input, acting.snap).target;
         const step = stepLog.append({
           actor: "model",
           action: call.toolName,
@@ -487,6 +490,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
           result: { ok: result.ok, detail: result.detail },
           url: current.snap.url,
           fingerprint: fp,
+          ...(acted ? { target: acted } : {}),
         });
         objectiveSteps.push(step.n);
         history.push(`${label} → ${truncate(result.detail, 140)}`);
@@ -634,6 +638,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
       reportDir,
       secrets,
       snapshots: pageSnapshots,
+      cfg,
       narrate,
       observe,
     });
