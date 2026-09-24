@@ -126,6 +126,70 @@ Same escalation + free-tier quota rules as before. Fill the Run Log table
   advice), recommended cadence (explore weekly / charter per feature / regress
   nightly with --fail-on-skipped), CLAUDE.md status + decision log.
 
+## 1.6 Run Log (P4-T5, self-run 2026-09-24)
+
+Two targets: a local fixture shop with five linked pages, an out-of-scope link
+and a page that can be added on cue (`/whatsnew`), and www.saucedemo.com live.
+Gemini requests across the whole acceptance: **≈130**, all on
+`gemini-3.1-flash-lite`, no quota error. Every run went through the real CLI, so
+the explorer prompt was answered by a real model throughout.
+
+| # | Result | Attempts | What happened |
+|---|--------|----------|---------------|
+| C1 | **PASS** | 2 | Fresh project, `run --explore`: queue starts `1 base`, discovers 3 pages mid-run, visits base → /catalogue → /cart → /help, generates objectives per page, **COMPLETED**, ingested (4 pages, 5 transitions, 1 flow). /help honestly returned `[]` — "nothing worth testing here". First attempt ended BUDGET_EXHAUSTED at 14/14 calls: my own budget, not a defect, and re-run at 30 with one objective per page. |
+| C2 | **PARTIAL** | 2 | Skips covered ground ✓ — but only after a defect fix (below); before it, the landing page re-proposed the objective C1 had already recorded. Goes to worst-covered pages ✓ (`4 under-covered`, no frontier left). Element coverage rose 7→9 of 21, and flow ingest reported `1 already known`. **"Fewer LLM calls than C1" ✗: 20 vs 20.** Diagnosed, not fudged — see finding 2. |
+| C3 | **PASS** | 1 | Added `/whatsnew` plus a nav link to it. The run announced `queued 1 newly discovered page(s)`, visited it as `frontier` in the same session, generated an objective for it, and `memory coverage` now lists it (5 pages known, /whatsnew 20% used). |
+| C4 | **PASS** | 2 | Live saucedemo, `probe_url: /inventory.html`. Completed within budget (4/16 calls), coverage section rendered, and the generated objective exercised a never-interacted element (the sort combobox: *"Selecting 'Price (low to high)' … reorders the product list"*), which also turned up a real 4xx finding. First attempt seeded from `base_url` — saucedemo's login page — and wasted the session proposing objectives about logging in again; two defects fixed (below) and re-run. |
+| C5 | **PASS** | 1 | The out-of-scope link is present on the landing page and was *seen* (`element_seen: link "Our partner site", interactions 0`) but appears in **no** frontier row, **no** page row and **no** navigation step. The three `example.com` strings in steps.jsonl are the model typing a test email address, not the link. |
+| C6 | **PASS** | 1 | `memory coverage --json`: valid against the exported zod schema, 0 bytes on stderr, and reconciles with `memory show` — coverage says 5 pages / 6 flows, show says `pages 5 · flows 6`. |
+| C7 | **PASS** | 1 | `strings` over every project's db, `-wal` and `-shm`, plus a recursive grep over all reports: `secret_sauce` 0 hits, Gemini key prefix 0, Groq key prefix 0, across all four acceptance projects. |
+| C8 | **PASS** | 1 | 253 tests green, build and typecheck clean. Every Phase 1–3 test file is **byte-identical** to the last Phase 3 commit (`git diff e760d16 -- …` is empty); Phase 4 adds three new test files and one additive line to the fixture app. |
+
+### Defects found and fixed during acceptance
+
+1. **Recorded flows were keyed only by the page a flow ENDS on** (found by C2).
+   A flow recorded as "click Catalogue on the landing page" ends on
+   `/catalogue`, so the landing page was never told it had a flow and the
+   explorer proposed the same objective a second time. Now keyed by start page
+   and end page.
+2. **Explore seeded from `base_url` even when `probe_url` was set** (found by
+   C4). On saucedemo that is the login form whether or not you are logged in,
+   so the session spent its first call generating objectives about logging in
+   again. The seed queue now starts from the probe target when there is one.
+3. **The auth check narrated `base_url` rather than the page it actually
+   probed** (found by C4) — a reader chasing a failure would have looked at the
+   wrong page.
+
+### Spec conflict resolved
+
+§1.3 says the per-page prompt lists "verified-flow names"; C2 expects ground
+covered by "now-verified/**draft**" flows to be skipped. Drafts are now included
+(broken flows are not): a draft is still ground captured as a replayable flow —
+`--regress --include-draft` runs it — so proposing an objective for it spends a
+model call to learn nothing.
+
+### Findings from acceptance (not scenario failures)
+
+1. **`href`-based discovery finds nothing on a JS-navigated app.** Probed
+   saucedemo's inventory page directly: every in-app anchor is `href="#"` with
+   navigation done in JavaScript, and the cart "link" carries no href at all.
+   Only the three social links have real hrefs, and they are out of scope. So
+   the frontier stays empty there — pages still enter the map when a session
+   actually visits them, but nothing is discovered ahead of time. Treating every
+   clickable as a candidate page is exactly the non-deterministic crawling §1.3
+   avoids, so the honest fix is a Phase 5 one: record a click that changes the
+   URL as a discovery, and/or ingest `sitemap.xml`.
+2. **Site-wide navigation keeps every page under 100% for a long time**, which
+   is why C2 cost the same as C1. The same "Home" link on five pages is five
+   `element_seen` rows, so queue rule (2) re-queues the whole map every run. The
+   mechanism that *does* make repeat exploration cheaper — a page at ratio 1
+   drops out of the queue for good — is unit-tested rather than demonstrated
+   live, because driving this fixture to full coverage would have cost more
+   quota than the point is worth.
+3. **A page that offers nothing says so.** `/help` returned `[]` twice. Worth
+   keeping: it is the behaviour that stops explore inventing objectives about
+   footer links.
+
 ## 3. Completion checklist
 - [ ] T0–T6 done; each task ended with a COMMIT POINT the user has committed
 - [ ] C1–C8 pass, Run Log filled

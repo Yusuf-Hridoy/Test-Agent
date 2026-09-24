@@ -205,7 +205,7 @@ describe("explore mode (P4-T3)", () => {
 
     const inventoryPrompt = h.prompts.explorer.find((p) => p.includes("/inventory"));
     expect(inventoryPrompt).toBeTruthy();
-    expect(inventoryPrompt!).toContain("ALREADY COVERED BY VERIFIED FLOWS");
+    expect(inventoryPrompt!).toContain("ALREADY COVERED BY RECORDED FLOWS");
     expect(inventoryPrompt!).toContain("Cart badge updates when an item is added");
     // Everything on a freshly-seen page counts as untouched.
     expect(inventoryPrompt!).toMatch(/NEVER INTERACTED WITH \(\d+\)/);

@@ -10,6 +10,7 @@ import type {
   Snapshot,
 } from "../types.js";
 import { envSecrets, loadConfig, projectPaths } from "../config/load.js";
+import { probeTargetFor } from "../config/schema.js";
 import { SecretStore } from "../model/redact.js";
 import { UsageTracker } from "../model/usage.js";
 import { askModel, ModelExhaustedError, type GenerateFn } from "../model/ask.js";
@@ -141,7 +142,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
     const page: Page = session.page;
 
     // ---- AUTH_CHECK ------------------------------------------------------
-    narrate(`checking session against ${cfg.base_url}`);
+    narrate(`checking session against ${probeTargetFor(cfg)}`);
     const auth = await ensureAuthenticated({ page, cfg, secrets, log: narrate });
     budget.countStep();
     harnessStep("auth_check", auth.detail, auth.ok, page.url());

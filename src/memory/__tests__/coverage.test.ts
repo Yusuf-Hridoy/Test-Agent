@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startFakeApp, type FakeApp } from "../../harness/__tests__/fakeapp.js";
 import { runSession } from "../../harness/session.js";
 import { _resetRateLimiter } from "../../model/ask.js";
-import { loadConfig } from "../../config/load.js";
+import { loadConfig, parseConfig } from "../../config/load.js";
 import {
   closeDb,
   elementsSeenOn,
@@ -22,6 +22,7 @@ import {
   coverageSchema,
 } from "../coverage.js";
 import { ingestSession } from "../ingest.js";
+import { buildSeedQueue } from "../frontier.js";
 
 /**
  * Coverage is only honest if it counts what was seen as well as what was used,
@@ -279,6 +280,99 @@ describe("coverage report (P4-T4)", () => {
     expect(report.elements).toEqual({ seen: 0, interacted: 0, ratio: 1 });
     expect(report.pages).toEqual({ known: 0, visited: 0, frontier: 0 });
     expect(coverageSchema.safeParse(report).success).toBe(true);
+    db.close();
+  });
+});
+
+/**
+ * The seed queue is the other half of coverage: it decides where a session
+ * goes. Its filters are what make repeated exploration get cheaper instead of
+ * re-walking the same map forever.
+ */
+describe("seed queue (P4-T3/T4)", () => {
+  const cfg = parseConfig(
+    `name: q\nbase_url: https://shop.test\nexplore:\n  max_new_pages: 2\n`,
+  );
+  const now = "2026-09-24T10:00:00+02:00";
+
+  function seeded(): MemoryDb {
+    const db = openEphemeralDb();
+    const page = db.prepare(
+      "INSERT INTO pages (page_key, sample_url, title, first_seen, last_seen) VALUES (?,?,?,?,?)",
+    );
+    const el = db.prepare(
+      "INSERT INTO element_seen (page_key, role, name, first_seen, last_seen, interactions) VALUES (?,?,?,?,?,?)",
+    );
+    // Fully exercised: nothing left to try here.
+    page.run("shop.test/done", "https://shop.test/done", "Done", now, now);
+    el.run("shop.test/done", "button", "Only control", now, now, 2);
+    // Half exercised.
+    page.run("shop.test/half", "https://shop.test/half", "Half", now, now);
+    el.run("shop.test/half", "button", "Used", now, now, 1);
+    el.run("shop.test/half", "button", "Unused", now, now, 0);
+    // Barely touched — should come first.
+    page.run("shop.test/cold", "https://shop.test/cold", "Cold", now, now);
+    for (const n of ["a", "b", "c", "d"]) el.run("shop.test/cold", "link", n, now, now, 0);
+    return db;
+  }
+
+  it("starts at base_url and nowhere else when memory is empty", () => {
+    const db = openEphemeralDb();
+    expect(buildSeedQueue(db, cfg)).toEqual([
+      { url: "https://shop.test", pageKey: "shop.test/", reason: "base" },
+    ]);
+    db.close();
+  });
+
+  it("starts at the probe page instead, when base_url cannot show anything", () => {
+    // Acceptance C4: on saucedemo the landing page is the login form whether or
+    // not you are logged in, so seeding there wastes the session's first call
+    // on objectives about logging in again.
+    const db = openEphemeralDb();
+    const probing = parseConfig(
+      `name: q\nbase_url: https://shop.test\nauth:\n  probe_url: /dashboard\n`,
+    );
+    expect(buildSeedQueue(db, probing)).toEqual([
+      { url: "https://shop.test/dashboard", pageKey: "shop.test/dashboard", reason: "base" },
+    ]);
+    db.close();
+  });
+
+  it("puts the frontier first, oldest first, capped by max_new_pages", () => {
+    const db = seeded();
+    const front = db.prepare(
+      "INSERT INTO frontier (page_key, sample_url, first_seen, seen_on_page) VALUES (?,?,?,?)",
+    );
+    front.run("shop.test/new1", "https://shop.test/new1", "2026-09-24T08:00:00+02:00", "shop.test/");
+    front.run("shop.test/new2", "https://shop.test/new2", "2026-09-24T09:00:00+02:00", "shop.test/");
+    front.run("shop.test/new3", "https://shop.test/new3", "2026-09-24T10:00:00+02:00", "shop.test/");
+
+    const queue = buildSeedQueue(db, cfg);
+    // max_new_pages is 2, so the third stays for next time.
+    expect(queue.filter((q) => q.reason === "frontier").map((q) => q.pageKey)).toEqual([
+      "shop.test/new1",
+      "shop.test/new2",
+    ]);
+    expect(queue.map((q) => q.pageKey)).not.toContain("shop.test/new3");
+    db.close();
+  });
+
+  it("then the least-exercised known pages, and never a finished one", () => {
+    const db = seeded();
+    const queue = buildSeedQueue(db, cfg).filter((q) => q.reason === "under-covered");
+    expect(queue.map((q) => q.pageKey)).toEqual(["shop.test/cold", "shop.test/half"]);
+    // This is what makes a second exploration cheaper than the first: a page
+    // with every element exercised drops out of the queue for good.
+    expect(queue.map((q) => q.pageKey)).not.toContain("shop.test/done");
+    db.close();
+  });
+
+  it("never queues a page outside scope", () => {
+    const db = seeded();
+    const narrow = parseConfig(
+      `name: q\nbase_url: https://shop.test\nscope:\n  include: ["shop.test/half"]\n`,
+    );
+    expect(buildSeedQueue(db, narrow).map((q) => q.pageKey)).toEqual(["shop.test/half"]);
     db.close();
   });
 });

@@ -1,5 +1,6 @@
 import type { MagpieConfig } from "../types.js";
 import { isUrlInScope } from "../browser/guard.js";
+import { probeTargetFor } from "../config/schema.js";
 import { normalizePageKey } from "./pagekey.js";
 import { openFrontier, pageCoverage, type MemoryDb } from "./db.js";
 
@@ -50,8 +51,11 @@ export function buildSeedQueue(db: MemoryDb, cfg: MagpieConfig): QueueEntry[] {
     if (sample) push(sample.sample_url, "under-covered");
   }
 
-  // 3. A project with no memory has exactly one place to start.
-  if (!queue.length) push(cfg.base_url, "base");
+  // 3. A project with no memory has exactly one place to start — the probe page
+  //    when there is one. Acceptance C4 caught this on saucedemo: base_url is
+  //    the login form whether or not you are logged in, so seeding there sent
+  //    the explorer to generate objectives about logging in again.
+  if (!queue.length) push(probeTargetFor(cfg), "base");
   return queue;
 }
 
@@ -74,17 +78,23 @@ export function untouchedElementsOn(
 }
 
 /**
- * Names of verified flows that already exercise this page. Explore is told to
- * avoid them: re-testing ground a deterministic replay already covers spends
- * model calls to learn nothing.
+ * Names of recorded flows that already exercise this page.
+ *
+ * Verified AND draft: both are ground already captured as a replayable flow
+ * (a draft replays under `--regress --include-draft`), so proposing an
+ * objective for it spends a model call to learn nothing. Broken flows are
+ * excluded — a flow that no longer runs covers nothing.
+ *
+ * (§1.3 says "verified"; drafts are included because acceptance C2 expects
+ * draft-covered ground to be skipped too, and it is right to.)
  */
-export function verifiedFlowsTouching(db: MemoryDb, pageKey: string, limit = 10): string[] {
+export function recordedFlowsTouching(db: MemoryDb, pageKey: string, limit = 10): string[] {
   return (
     db
       .prepare(
         `SELECT DISTINCT f.name AS name
          FROM flows f JOIN flow_steps s ON s.flow_id = f.id
-         WHERE f.status = 'verified' AND (s.url_after = ? OR f.start_page_key = ?)
+         WHERE f.status IN ('verified', 'draft') AND (s.url_after = ? OR f.start_page_key = ?)
          ORDER BY f.name LIMIT ?`,
       )
       .all(pageKey, pageKey, limit) as { name: string }[]

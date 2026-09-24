@@ -240,7 +240,7 @@ application nobody has described to you. Decide what is worth testing HERE, on
 this page, right now.
 
 You are given the page snapshot, the elements Magpie has never interacted with,
-and the names of flows already verified on this page.
+and the names of flows already recorded on this page.
 
 Rules:
 - Propose AT MOST the number of objectives you are asked for. Each is ONE
@@ -248,7 +248,7 @@ Rules:
   screen (e.g. "Submitting the form with an empty email shows a field error").
 - Prefer the elements listed as never interacted with: closing that gap is why
   this session exists.
-- Do NOT propose anything a listed verified flow already covers. Those replay
+- Do NOT propose anything a listed recorded flow already covers. Those replay
   deterministically at no cost, so re-testing them here buys nothing.
 - Match the technique to what the objective actually exercises: forms invite
   required-field and invalid-input; lists and quantities invite boundary and
@@ -271,7 +271,7 @@ export interface ExplorePromptInput {
   snapshot: Snapshot;
   /** Elements on this page nothing has ever interacted with. */
   untouched: { role: string; name: string }[];
-  /** Names of verified flows that already exercise this page. */
+  /** Names of recorded flows (verified or draft) that already exercise this page. */
   covered: string[];
   max: number;
 }
@@ -287,9 +287,9 @@ export function explorerUserMessage(input: ExplorePromptInput): string {
   sections.push(
     ``,
     input.covered.length
-      ? `ALREADY COVERED BY VERIFIED FLOWS (do not re-test these):\n` +
+      ? `ALREADY COVERED BY RECORDED FLOWS (do not re-test these):\n` +
           input.covered.map((n) => `  - ${n}`).join("\n")
-      : `ALREADY COVERED BY VERIFIED FLOWS: nothing yet.`,
+      : `ALREADY COVERED BY RECORDED FLOWS: nothing yet.`,
   );
   sections.push(``, `Propose at most ${input.max} objectives for THIS page.`);
   return sections.join("\n");

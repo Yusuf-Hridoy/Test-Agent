@@ -3,6 +3,7 @@ import type { MagpieConfig, Snapshot } from "../types.js";
 import type { SecretStore } from "../model/redact.js";
 import { takeSnapshot } from "../browser/snapshot.js";
 import { click, fill, goto, press, type ActionContext } from "../browser/actions.js";
+import { probeTargetFor } from "../config/schema.js";
 
 export interface AuthOutcome {
   ok: boolean;
@@ -10,27 +11,6 @@ export interface AuthOutcome {
   detail: string;
   /** Set when a form login succeeded and the session state should be re-saved. */
   reauthenticated?: boolean;
-}
-
-/**
- * Where the "is this session alive?" question gets asked.
- *
- * `base_url` cannot answer it on an app whose landing page always shows the
- * login form — logged in or out, you see the same screen. `auth.probe_url`
- * points at a page that genuinely requires a session, and the session then
- * continues from there: bouncing back to a login page would only hand the
- * planner the one screen that tells it nothing.
- */
-export function probeTargetFor(cfg: MagpieConfig): string {
-  const probe = cfg.auth.probe_url?.trim();
-  if (!probe) return cfg.base_url;
-  try {
-    return new URL(probe, cfg.base_url).toString();
-  } catch {
-    // The config schema rejects this, so it can only happen to a hand-built
-    // config object in a test — fall back rather than throw at run time.
-    return cfg.base_url;
-  }
 }
 
 /** Landing-page heuristic: a login URL or a password box means "logged out". */

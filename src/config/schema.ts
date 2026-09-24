@@ -124,3 +124,23 @@ export function withDerivedDefaults(cfg: MagpieConfig): MagpieConfig {
   }
   return cfg;
 }
+
+/**
+ * The page that can answer "is this session alive?", and the best page to start
+ * from generally.
+ *
+ * `base_url` cannot answer it on an app whose landing page always shows the
+ * login form — logged in or out, you see the same screen. `auth.probe_url`
+ * points at a page that genuinely requires a session.
+ */
+export function probeTargetFor(cfg: MagpieConfig): string {
+  const probe = cfg.auth.probe_url?.trim();
+  if (!probe) return cfg.base_url;
+  try {
+    return new URL(probe, cfg.base_url).toString();
+  } catch {
+    // The schema above rejects this, so it can only happen to a hand-built
+    // config object in a test — fall back rather than throw at run time.
+    return cfg.base_url;
+  }
+}

@@ -4,7 +4,8 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startFakeApp, type FakeApp } from "./fakeapp.js";
 import { openBrowser, closeBrowser, type BrowserSession } from "../../browser/session.js";
-import { ensureAuthenticated, probeTargetFor } from "../auth.js";
+import { ensureAuthenticated } from "../auth.js";
+import { probeTargetFor } from "../../config/schema.js";
 import { parseConfig, ConfigError } from "../../config/load.js";
 import { SecretStore } from "../../model/redact.js";
 
