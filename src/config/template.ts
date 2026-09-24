@@ -9,9 +9,7 @@ export function configTemplate(name: string, baseUrl: string): string {
   const forbidden = DEFAULT_FORBIDDEN_ELEMENTS.map((f) => `  - "${f}"`).join("\n");
   return `# Magpie project config — safe to commit. Secrets live in .env (gitignored).
 name: "${name}"
-# Where every session starts. If your app's landing page always shows the login
-# form, point this at a page that requires a session (e.g. /dashboard) so Magpie
-# can tell a live session from a dead one.
+# Where every session starts.
 base_url: "${baseUrl}"
 
 auth:
@@ -19,6 +17,11 @@ auth:
   # form-login  → Magpie fills the login form itself using the env vars below
   strategy: manual
   # login_url: "${origin}/login"
+  # Page Magpie opens to decide whether the saved session is still alive.
+  # Defaults to base_url. Set it when your landing page shows the login form
+  # whether or not you are logged in — that page cannot answer the question.
+  # A path is resolved against base_url, e.g. on saucedemo:
+  # probe_url: /inventory.html
   user_env: APP_USER
   pass_env: APP_PASS
 

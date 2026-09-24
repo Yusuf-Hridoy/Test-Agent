@@ -56,9 +56,10 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
     }
     console.log('Now run: magpie run --charter "..."');
     console.log(
-      "If Magpie still reports AUTH_REQUIRED, point base_url at a page that needs a\n" +
-        "session (e.g. /dashboard): on apps whose landing page is always the login form,\n" +
-        "that page is the only way to tell a live session from a dead one.",
+      "If Magpie still reports AUTH_REQUIRED, set auth.probe_url to a page that needs a\n" +
+        "session (e.g. probe_url: /dashboard): on apps whose landing page is always the\n" +
+        "login form, that page is the only way to tell a live session from a dead one.\n" +
+        "base_url stays where it is — only the session check moves.",
     );
   } finally {
     await closeBrowser(session); // discard the trace: it would capture the login

@@ -119,8 +119,9 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   if (result.status === "AUTH_REQUIRED") {
     console.error("\nNo usable session. Run `magpie login` first.");
     console.error(
-      "Already logged in there? Point base_url at a page that requires a session —\n" +
-        "a landing page that always shows the login form cannot prove one exists.",
+      "Already logged in there? Set auth.probe_url to a page that requires a session\n" +
+        "(e.g. probe_url: /dashboard) — a landing page that always shows the login form\n" +
+        "cannot prove one exists. base_url is unaffected; only the check moves.",
     );
   }
   process.exitCode = exitCodeFor(result.status);

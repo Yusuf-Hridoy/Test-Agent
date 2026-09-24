@@ -104,7 +104,8 @@ runs: [docs/ci.md](docs/ci.md#exit-codes).
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | — | Project name, shown in the report |
-| `base_url` | — | Where every session starts. If your landing page always shows the login form, point this at a page that *requires* a session (e.g. `/dashboard`) — otherwise Magpie cannot tell a live session from a dead one |
+| `base_url` | — | Where every session starts |
+| `auth.probe_url` | `base_url` | Page Magpie opens to decide whether the saved session is alive. Set it when your landing page shows the login form whether or not you are logged in — that page cannot answer the question. A path is resolved against `base_url` (saucedemo: `/inventory.html`) |
 | `auth.strategy` | `manual` | `manual` = capture a session with `magpie login`; `form-login` = Magpie fills the form itself |
 | `auth.login_url` | — | Only if the login form is not on `base_url` |
 | `auth.user_env` / `auth.pass_env` | `APP_USER` / `APP_PASS` | Names of the `.env` variables holding credentials |

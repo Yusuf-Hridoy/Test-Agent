@@ -12,6 +12,27 @@ export interface AuthOutcome {
   reauthenticated?: boolean;
 }
 
+/**
+ * Where the "is this session alive?" question gets asked.
+ *
+ * `base_url` cannot answer it on an app whose landing page always shows the
+ * login form — logged in or out, you see the same screen. `auth.probe_url`
+ * points at a page that genuinely requires a session, and the session then
+ * continues from there: bouncing back to a login page would only hand the
+ * planner the one screen that tells it nothing.
+ */
+export function probeTargetFor(cfg: MagpieConfig): string {
+  const probe = cfg.auth.probe_url?.trim();
+  if (!probe) return cfg.base_url;
+  try {
+    return new URL(probe, cfg.base_url).toString();
+  } catch {
+    // The config schema rejects this, so it can only happen to a hand-built
+    // config object in a test — fall back rather than throw at run time.
+    return cfg.base_url;
+  }
+}
+
 /** Landing-page heuristic: a login URL or a password box means "logged out". */
 export function looksLoggedOut(snap: Snapshot): boolean {
   if (/\/(login|signin|sign-in|auth)(\/|\?|$)/i.test(snap.url)) return true;
@@ -51,9 +72,10 @@ function findLoginFields(snap: Snapshot) {
 }
 
 /**
- * Brief §P1-T6 auth check: land on base_url, decide whether we are logged in,
- * and for `form-login` do the login ourselves. `manual` hands back to the CLI,
- * which exits 3 telling the user to run `magpie login`.
+ * Auth check (PHASE-1-BRIEF §P1-T6, probe target added in Phase 4): land on the
+ * probe page, decide whether we are logged in, and for `form-login` do the
+ * login ourselves. `manual` hands back to the CLI, which exits 3 telling the
+ * user to run `magpie login`.
  */
 export async function ensureAuthenticated(args: {
   page: Page;
@@ -70,9 +92,10 @@ export async function ensureAuthenticated(args: {
   };
 
   let ctx = await context();
-  const landing = await goto(ctx, cfg.base_url);
+  const probe = probeTargetFor(cfg);
+  const landing = await goto(ctx, probe);
   if (!landing.ok) {
-    return { ok: false, detail: `could not reach ${cfg.base_url}: ${landing.detail}` };
+    return { ok: false, detail: `could not reach ${probe}: ${landing.detail}` };
   }
 
   ctx = await context();
@@ -86,6 +109,9 @@ export async function ensureAuthenticated(args: {
       detail: "no valid session — run `magpie login` to capture one",
     };
   }
+
+  // form-login from here on. If the probe page is not where the form lives,
+  // `auth.login_url` takes the browser there below.
 
   const username = process.env[cfg.auth.user_env];
   const password = process.env[cfg.auth.pass_env];

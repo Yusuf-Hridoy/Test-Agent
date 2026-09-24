@@ -38,6 +38,9 @@ export const configSchema = z
       .object({
         strategy: z.enum(["manual", "form-login"]).default("manual"),
         login_url: z.string().url().optional(),
+        // A path ("/inventory.html") or an absolute URL; resolved against
+        // base_url, so the common case stays short.
+        probe_url: z.string().min(1).optional(),
         user_env: z.string().default("APP_USER"),
         pass_env: z.string().default("APP_PASS"),
       })
@@ -77,7 +80,22 @@ export const configSchema = z
       })
       .default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((cfg, ctx) => {
+    // Checked here rather than on the field itself: a relative probe_url is
+    // only meaningful next to base_url, and zod cannot see a sibling from
+    // inside a leaf validator.
+    if (!cfg.auth?.probe_url) return;
+    try {
+      new URL(cfg.auth.probe_url, cfg.base_url);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["auth", "probe_url"],
+        message: `"${cfg.auth.probe_url}" is not a usable URL or path relative to base_url`,
+      });
+    }
+  });
 
 export type RawConfig = z.input<typeof configSchema>;
 

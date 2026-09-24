@@ -11,6 +11,12 @@ export interface MagpieConfig {
   auth: {
     strategy: "manual" | "form-login";
     login_url?: string;
+    /**
+     * Page used to decide whether a session is alive. Defaults to base_url,
+     * which cannot answer the question on apps whose landing page always shows
+     * the login form.
+     */
+    probe_url?: string;
     user_env: string;
     pass_env: string;
   };
