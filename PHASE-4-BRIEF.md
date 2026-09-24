@@ -191,10 +191,8 @@ model call to learn nothing.
    footer links.
 
 ## 3. Completion checklist
-- [ ] T0–T6 done; each task ended with a COMMIT POINT the user has committed
-- [ ] C1–C8 pass, Run Log filled
-- [ ] CLAUDE.md: Phase 4 COMPLETE + decision log (deviations with reasons)
-- [ ] Handoff message to the user: the ordered list of commits made, the
-      command to push and open the PR from `phase-4`, what explore does in two
-      sentences, and anything deferred to Phase 5 — **PR stays unmerged until
-      the reviewer signs off**
+- [x] T0–T6 done; each task ended with a COMMIT POINT the user committed
+- [x] C1–C8 run, Run Log filled — **C2 partial** (diagnosed above), the rest pass
+- [x] CLAUDE.md: Phase 4 complete + decision log (14 entries, 1 deviation,
+      1 spec conflict, 3 acceptance defects)
+- [x] Handoff message delivered — PR stays unmerged until the reviewer signs off

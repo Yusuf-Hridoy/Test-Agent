@@ -10,12 +10,13 @@ and a Playwright trace.
 
 It runs on **free-tier LLM APIs** (Gemini, Groq, Mistral). No paid key required.
 
-> **Phase 3.** Magpie explores (`run --charter`), **remembers** (a per-project
-> SQLite memory: app map, replayable flows, past findings) and now **regresses**:
-> `run --regress all` replays every verified flow for **zero model calls**, tells
-> you what broke since last night, and is ready for a cron job.
-> See [Memory](#memory), [Regression mode](#regression-mode) and
-> [Running Magpie in CI](docs/ci.md).
+> **Phase 4.** Three ways to run it, one memory underneath.
+> `run --charter` tests what you describe · `run --explore` tests what Magpie
+> finds on its own · `run --regress all` replays every verified flow for **zero
+> model calls** and tells you what broke since last night.
+> See [Memory](#memory), [Explore mode](#explore-mode),
+> [Regression mode](#regression-mode), [Recommended cadence](#recommended-cadence)
+> and [Running Magpie in CI](docs/ci.md).
 
 ---
 
@@ -84,8 +85,10 @@ reports/2026-09-16_14-32-05/
 | `magpie init --name <n> --url <u>` | Create a project folder: config, `.env`, `.gitignore`, `.auth/`, `reports/` |
 | `magpie login [--as <name>]` | Open a headed browser, you log in, press Enter; the session is saved to `.auth/<name>.json` |
 | `magpie run --charter "<what to test>" [--as <name>] [--headed]` | Plan and execute a test session, then write the report |
+| `magpie run --explore [--headed]` | Let Magpie choose what to test, page by page |
 | `magpie memory show` | Pages, flows and sessions this project remembers |
 | `magpie memory stats` | Database size, totals, schema version |
+| `magpie memory coverage [--json]` | Pages visited vs. frontier, element coverage per page, where to look next |
 | `magpie flows list` | Every remembered flow: status, steps, last replay |
 | `magpie flows show <slug>` | One flow's steps, in the order replay runs them |
 | `magpie run --regress all [--fail-on-skipped] [--include-draft] [--heal] [--json]` | Replay remembered flows as a suite — **no model calls** unless you pass `--heal` |
@@ -122,6 +125,8 @@ runs: [docs/ci.md](docs/ci.md#exit-codes).
 | `run.slow_network_grace_ms` | `15000` | Extra time a timed-out action gets on one retry before it counts as a failure |
 | `regress.heal` | `false` | Let a model relocate a failed step during `--regress` (same as `--heal`) |
 | `regress.max_heal_calls` | `10` | Hard cap on healing model calls for a whole suite |
+| `explore.max_new_pages` | `8` | How many never-visited pages one exploratory session may take off the frontier |
+| `explore.max_objectives_per_page` | `3` | Objectives generated per page — one model call produces them all |
 
 Default models (all free-tier, all tool-calling). Free-tier quotas are **per
 model per day** — Magpie defaults to models whose daily quota can sustain a whole
@@ -146,9 +151,10 @@ EXECUTION  Playwright (Chromium) — navigate / observe / act, storageState auth
 MEMORY     SQLite per project — app map, replayable flows, past findings
 ```
 
-Budgets and safety are never enforced by prompting. The while-loop lives in
-`src/harness/session.ts`; the model is called once per decision and can only act
-through nine tools (`goto`, `click`, `fill`, `select`, `press`, `wait`, `look`,
+Where to go is decided by code (the explorer's queue, the regression selection);
+what to test and what things mean is decided by the model. Budgets and safety are
+never enforced by prompting. The while-loop lives in `src/harness/session.ts`;
+the model is called once per decision and can only act through nine tools (`goto`, `click`, `fill`, `select`, `press`, `wait`, `look`,
 `report_finding`, `mark_objective`). If it asks for something forbidden, the
 harness refuses and tells it so.
 
@@ -254,6 +260,102 @@ choice and a reasonable one: it holds no secrets, and checking it in gives your
 team a shared set of replayable flows that arrive with the repository. Delete the
 `memory/` line from the generated `.gitignore` if you want that.
 
+## Explore mode
+
+Nobody has time to write a charter for every corner of an application. Point
+Magpie at one and let it decide:
+
+```bash
+magpie run --explore
+```
+
+```
+exploring 1 page(s): 1 base
+
+◆ 127.0.0.1:8098/ (base)
+  O-01 [happy-path] Clicking the 'Catalogue' link navigates the user to the products listing page
+  queued 3 newly discovered page(s)
+
+◆ 127.0.0.1:8098/catalogue (frontier)
+  O-02 [state-transition] Clicking 'Add to cart' on the 'Widget' item updates the cart indicator
+
+◆ 127.0.0.1:8098/cart (frontier)
+  O-03 [required-field] Submitting the order with an empty Full name shows a validation error
+
+◆ 127.0.0.1:8098/help (frontier)
+  nothing worth testing here
+```
+
+Where it goes is decided by **plain code**, not by a model: pages on the
+frontier first (linked from somewhere Magpie has been, never opened), then the
+pages whose elements are least exercised, then — for a project with no memory at
+all — wherever you told it to start. What is worth testing *on* a page is the
+one question a model answers, in a single call per page. Pages found along the
+way are appended to the queue, and **budgets are the only crawl limit**: when
+`max_steps` or `max_llm_requests` runs out, the session finalizes with
+everything it learned.
+
+Each page is told which of its elements have never been interacted with, and
+which flows already cover it, so exploration adds ground rather than repeating
+it. A page that genuinely has nothing to test says so — `[]` is a legitimate
+answer, and better than three objectives about a footer link.
+
+Everything lands in the same memory as a charter run: the app map, the flows
+(which `--regress` can then replay for free), and the findings.
+
+### ⚠ Explore against staging, not production
+
+Every other mode does what you asked. **Explore does what it decides**, and the
+only things standing between it and a page you did not want touched are
+`scope.exclude` and `forbidden_elements`. So:
+
+- Run it against **staging or a disposable environment**. Exploring production
+  is a misuse of it, not a brave choice.
+- Fill in **`scope.exclude`** before the first exploratory run — admin areas,
+  anything that emails customers, anything that spends money.
+- Keep **`forbidden_elements`** honest for your app. The defaults refuse
+  logout, delete, billing, payment, purchase and subscribe; your app's
+  destructive verbs may differ.
+- Use an account whose damage you can absorb, and expect it to be used: an
+  explorer fills in forms and presses buttons, which is the entire point.
+
+The guards are enforced in code, not by prompting, and every refusal is logged
+as a step. But a guard cannot know that `/admin/rebuild-index` is expensive —
+only you can.
+
+### Coverage, honestly
+
+```bash
+magpie memory coverage
+```
+
+```
+pages known     5
+  visited       5
+  frontier      0 (linked, never opened)
+elements used   10 of 30 seen (33%)
+flows           6 (0 verified, 6 draft, 0 broken)
+
+least-exercised pages
+  USED  PAGE                      ELEMENTS  FLOWS
+  20%   127.0.0.1:8098/           1/5       0
+  20%   127.0.0.1:8098/help       1/5       0
+  33%   127.0.0.1:8098/catalogue  2/6       0
+
+Coverage is measured against pages Magpie has discovered; unknown areas are
+not included.
+```
+
+That last line is not boilerplate. Magpie draws its own map, so coverage is a
+measure of how much of *what it has found* has been exercised — never a claim
+about the whole application. `--json` gives the same document (schema-stable,
+caveat included) for a dashboard or a CI step.
+
+One known limit: discovery reads real `href`s. On an application that navigates
+in JavaScript — every in-app link an `href="#"` — nothing is discovered ahead of
+time, and the map grows only as sessions actually walk through pages. Traditional
+link navigation crawls properly.
+
 ## Regression mode
 
 Once flows are remembered, a whole suite of them replays for nothing:
@@ -339,6 +441,30 @@ charter once and they learn their positions.
 For nightly runs, exit codes and `suite.json`, see
 **[Running Magpie in CI](docs/ci.md)**.
 
+## Recommended cadence
+
+The three modes are not alternatives; they are a cycle. Exploration finds
+ground, charters test it deliberately, regression keeps it honest, and the
+cheapest mode runs the most often.
+
+| When | Command | Costs |
+|---|---|---|
+| **Nightly**, in CI | `magpie run --regress all --fail-on-skipped --json` | nothing — zero model calls |
+| **Per feature**, while you build it | `magpie run --charter "…"` | a few dozen model calls |
+| **Weekly**, against staging | `magpie run --explore` | a few dozen model calls |
+| **After either**, when a flow needs proving | `magpie flows verify <slug>` | nothing |
+
+A useful rhythm on a new app: explore once to draw the map, read
+`magpie memory coverage` to see what it found, write charters for the flows that
+matter to your users, then let the nightly regression suite carry them. Each
+exploratory run afterwards costs less on the ground it has already covered — a
+page with every element exercised drops off the queue for good.
+
+Two honest caveats. Absence of a finding is never proof of a fix: Magpie does
+not auto-close anything. And a `broken` flow is skipped rather than failed, so
+`--fail-on-skipped` is what keeps a shrinking suite from reporting green — see
+[docs/ci.md](docs/ci.md#a-broken-flow-must-not-make-ci-green).
+
 ## Security model
 
 What **never leaves your machine**: your `.env`, your saved sessions in
@@ -379,6 +505,9 @@ oracles, evidence and report are all covered without spending a token.
 `src/memory/__tests__/replay.test.ts` goes further: it records a flow with a
 scripted model, replays it with none, breaks the fixture app on cue to prove the
 replay fails at the right step, then fixes it and re-verifies.
+`explore.test.ts` drives a whole exploratory session against the fixture app —
+queue order, mid-run discovery, scope refusals, and budgets stopping the crawl —
+also without spending a token.
 
 ## License
 

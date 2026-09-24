@@ -95,7 +95,8 @@ magpie/
     harness/        budgets, loop detector, checkpoints, scope guard, auth check
     evidence/       step logger, screenshot/trace management, finding builder
     report/         HTML + terminal report generators
-    memory/         db + migrations, page keys, ingest, replay, regression suite, healer, context
+    memory/         db + migrations, page keys, ingest, replay, regression suite,
+                    healer, planner context, explorer queue, coverage
   templates/        report HTML template
   test-projects/    example generated project folder (docs/demo)
   package.json  tsconfig.json  README.md  CLAUDE.md  PHASE-*-BRIEF.md
@@ -161,8 +162,8 @@ A **project folder** (created by `magpie init`, lives anywhere on the user's dis
 | 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | complete (2026-09-19) |
 | 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | complete (2026-09-23) |
 | 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | complete (2026-09-23) |
-| 4 | Explore mode: coverage matrix, scenario planner, CI integration | **CURRENT** (CI integration already shipped in Phase 3) |
-| 5 | Polish: dashboard, docs site, public launch | pending |
+| 4 | Explore mode: coverage matrix, scenario planner, CI integration | complete (2026-09-24); CI integration shipped in Phase 3 |
+| 5 | Polish: dashboard, docs site, public launch | **NEXT** (awaiting brief) |
 
 Only the CURRENT phase's brief is authoritative. Do not implement future phases
 early, even partially, unless the brief says to leave a seam for them.
@@ -228,9 +229,28 @@ early, even partially, unless the brief says to leave a seam for them.
 - 2026-09-23 (P3-T4): a healed flow is demoted to `draft` and the suite exits 1. Healing proves something similar is still on the page; it does not prove the application still does what the flow asserts.
 - 2026-09-23 (P3-T6): `init` and `flows delete` now refuse to prompt when stdin is not a TTY. Neither is in the regress path, but a scripted call that hangs forever looks exactly like a job that is still working — failing loudly is the kinder bug.
 
+- 2026-09-24 (P4-T1): `auth.probe_url` probes a page that can answer "is this session alive?", and the session then CONTINUES from there rather than bouncing back to base_url — on the apps this field exists for, base_url is the login form, and starting the session there hands the planner the one screen that tells it nothing. `probeTargetFor` lives in `src/config/schema.ts` (a derived config value) so both the harness and the memory layer can use it without importing across layers.
+- 2026-09-24 (P4-T2): `ElementRef.href` is captured for anchors but deliberately NOT rendered into any prompt — it exists so memory can learn a page exists without visiting it, and `renderSnapshot` stays byte-identical to Phase 1.
+- 2026-09-24 (P4-T2): `StepRecord.target` records the acted-on element by role+name. Snapshot ids die with the session; element coverage has to outlive it.
+- 2026-09-24 (P4-T2): frontier and element coverage are recorded for EVERY session, not only explore. A charter run discovers pages and leaves elements untouched in exactly the same way, and coverage that counted only exploratory runs would understate what is already tested.
+- 2026-09-24 (P4-T2): ingestion without a config (a disk-only re-ingest) leaves the frontier alone rather than guessing at scope. Guessing would put somebody else's website on the crawl queue.
+- 2026-09-24 (P4-T2): nameless elements are not counted in coverage — nothing could ever say "this one was exercised" about them, so counting them would depress every ratio by a constant.
+- 2026-09-24 (P4-T3): the explorer reads memory once at session start and closes the handle. The database does not change mid-session (ingestion is at the end), and a connection held open for twenty minutes is a lock waiting to bite.
+- 2026-09-24 (P4-T3): a page merely walked across during an objective is still queued for its own turn. Passing through a page is not exploring it, and pages reachable only by clicking would otherwise never get objectives of their own.
+- 2026-09-24 (P4-T3): a malformed objective generation costs that page its turn, not the session (unlike planning, which fails the run). Explore has many pages; killing the crawl over one bad reply would discard every page already explored.
+- 2026-09-24 (P4-T4, deviation): the report's Coverage section renders for every ingested run, not only exploratory ones (§1.4 says "explore report"). The numbers are equally true of a charter run, and two report shapes would be a maintenance trap for no gain.
+- 2026-09-24 (P4-T4): a page with nothing interactive scores ratio 1, not 0. It cannot be under-explored, and ranking it worst would send the explorer back to it forever.
+- 2026-09-24 (P4-T5, spec conflict): the per-page prompt lists recorded flows that are verified OR draft. §1.3 says "verified", but acceptance C2 expects draft-covered ground skipped, and it is right: a draft replays under `--regress --include-draft`, so proposing an objective for it spends a call to learn nothing. Broken flows are excluded — a flow that no longer runs covers nothing.
+- 2026-09-24 (P4-T5): recorded flows are keyed by the page a flow STARTS from as well as the one it ENDS on. Found by acceptance: a flow recorded as "click Catalogue on the landing page" ends on /catalogue, so keying only on the end page left the landing page ignorant of its own flow and the explorer proposed it twice.
+- 2026-09-24 (P4-T5): the explore seed queue starts from the probe target when one is set. Found by acceptance on saucedemo, where seeding from base_url spent the session's first call generating objectives about logging in again.
+
 ## 11. Current status
 
-- Phase: 4 — **in progress**, started 2026-09-24 on branch `phase-4`. Brief: PHASE-4-BRIEF.md (in the repo). **Git protocol for this phase: the USER runs every git command.** Claude makes no commits, branches or pushes; it stops at each task boundary with a COMMIT POINT block and waits for "committed".
+- Phase: 4 — **complete, acceptance run 2026-09-24**. Brief + Run Log: PHASE-4-BRIEF.md. PR from `phase-4` awaits review; **do not merge it without the reviewer**. Next: await PHASE-5-BRIEF.md. Do NOT start Phase 5.
+- **Git protocol for this phase: the USER ran every git command.** Claude made no commits, branches or pushes; it stopped at each task boundary with a COMMIT POINT block. Commits landed on `main` rather than a `phase-4` branch — worth checking before the PR is opened.
+- Scenario results: **C1, C3, C4, C5, C6, C7, C8 PASS. C2 PARTIAL** — it does skip covered ground and does go to the worst-covered pages, but "fewer LLM calls than C1" did not hold (20 vs 20): a site-wide nav keeps every page under 100%, so queue rule (2) re-queues the whole map each run. The mechanism that makes repeats cheaper (a page at ratio 1 drops off the queue) is unit-tested instead.
+- Acceptance found and fixed **3 defects** (flows keyed only by their end page; explore seeding from base_url despite probe_url; the auth check narrating the wrong page) and spent ≈130 Gemini requests. 253 tests green, build clean, every Phase 1–3 test file byte-identical.
+- Known limit, top Phase 5 candidate: **discovery reads real `href`s**, so a JS-navigated app (saucedemo: every in-app anchor is `href="#"`, the cart link has none) yields an empty frontier. Pages still enter the map when a session walks them. The honest fixes are recording a click that changes the URL as a discovery, and/or ingesting `sitemap.xml` — both noted out of scope for Phase 4.
 - Phase 3 — complete, acceptance run 2026-09-23, merged to `main` via PR #2. Brief + Run Log: PHASE-3-BRIEF.md. Followed by `fix(P3): --fail-on-skipped` (reviewer-authorized) on main.
 
 ### Phase 3 (complete 2026-09-23), for reference
