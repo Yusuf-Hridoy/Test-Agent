@@ -161,7 +161,7 @@ A **project folder** (created by `magpie init`, lives anywhere on the user's dis
 | 1 | Execution core: init/login/run(charter), agent loop on free-tier models, harness, evidence, HTML report | complete (2026-09-19) |
 | 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | complete (2026-09-23) |
 | 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | complete (2026-09-23) |
-| 4 | Explore mode: coverage matrix, scenario planner, CI integration | **NEXT** (awaiting brief; CI docs already shipped in Phase 3) |
+| 4 | Explore mode: coverage matrix, scenario planner, CI integration | **CURRENT** (CI integration already shipped in Phase 3) |
 | 5 | Polish: dashboard, docs site, public launch | pending |
 
 Only the CURRENT phase's brief is authoritative. Do not implement future phases
@@ -230,10 +230,14 @@ early, even partially, unless the brief says to leave a seam for them.
 
 ## 11. Current status
 
-- Phase: 3 — **complete, acceptance run 2026-09-23** on branch `phase-3`; PR open, awaiting review. Brief + Run Log: PHASE-3-BRIEF.md. Next: await PHASE-4-BRIEF.md. Do NOT start Phase 4.
+- Phase: 4 — **in progress**, started 2026-09-24 on branch `phase-4`. Brief: PHASE-4-BRIEF.md (in the repo). **Git protocol for this phase: the USER runs every git command.** Claude makes no commits, branches or pushes; it stops at each task boundary with a COMMIT POINT block and waits for "committed".
+- Phase 3 — complete, acceptance run 2026-09-23, merged to `main` via PR #2. Brief + Run Log: PHASE-3-BRIEF.md. Followed by `fix(P3): --fail-on-skipped` (reviewer-authorized) on main.
+
+### Phase 3 (complete 2026-09-23), for reference
+
 - Scenario results: **B1–B9 all PASS**. Acceptance spent 10 model requests in total (8 recording a charter, 2 healing); everything else ran free. 225 tests green, build clean.
 - What works, measured live: a catalogue flow records *which* button it clicked and replays the third product exactly (screenshot-verified) in 2.1 s for nothing; `run --regress all` is a CI-ready suite with schema-valid `suite.json` on stdout; a renamed control is healed, patched and demoted to draft; a removed control makes the model answer **broken** rather than invent a relocation, producing a high-confidence `regression` finding that cites when the flow last passed; the same defect reports KNOWN(2×) the next night.
-- Known hazard, top candidate for Phase 4: **a broken flow makes CI green.** `--regress all` skips `broken` flows and skipping is not failing, so a suite whose flows have all broken exits 0 while testing nothing. Exit codes were fixed by the brief, so this is documented with a `jq` gate on `totals.skipped` in docs/ci.md rather than changed unilaterally. A `--fail-on-skipped` flag is the clean fix.
+- Known hazard — **fixed after the merge** by `--fail-on-skipped` (off by default; every CI example passes it): `--regress all` skips `broken` flows and skipping is not failing, so a suite whose flows had all broken exited 0 while testing nothing. Without the flag the summary now ends with a loud skip count.
 
 ### Phase 2 (complete 2026-09-23), for reference
 
