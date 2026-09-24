@@ -230,3 +230,67 @@ export function healUserMessage(input: HealPromptInput): string {
   ];
   return lines.join("\n");
 }
+
+/**
+ * Explorer system prompt (PHASE-4-BRIEF §1.3). The planner is given a charter;
+ * the explorer is given only a page, and has to decide what is worth testing.
+ */
+export const EXPLORER_SYSTEM_PROMPT = `You are Magpie's explorer: a senior QA engineer who has just opened a page of an
+application nobody has described to you. Decide what is worth testing HERE, on
+this page, right now.
+
+You are given the page snapshot, the elements Magpie has never interacted with,
+and the names of flows already verified on this page.
+
+Rules:
+- Propose AT MOST the number of objectives you are asked for. Each is ONE
+  verifiable outcome, phrased so that success or failure is obvious from the
+  screen (e.g. "Submitting the form with an empty email shows a field error").
+- Prefer the elements listed as never interacted with: closing that gap is why
+  this session exists.
+- Do NOT propose anything a listed verified flow already covers. Those replay
+  deterministically at no cost, so re-testing them here buys nothing.
+- Match the technique to what the objective actually exercises: forms invite
+  required-field and invalid-input; lists and quantities invite boundary and
+  duplicate; toggles, carts and wizards invite state-transition.
+- Never propose logging out, deleting data or accounts, paying, or navigating
+  off the application. The system refuses those, and an objective that will be
+  refused is a wasted objective.
+- Stay on this page. If reaching the outcome needs a different page, that page
+  will get its own turn.
+- If the page genuinely offers nothing worth testing, answer with an empty
+  array. An honest [] beats three objectives about a footer link.
+
+Answer with STRICT JSON ONLY — no prose, no code fences — shaped exactly:
+[{"description":"...","technique":"happy-path"}]
+
+technique must be one of: happy-path, boundary, required-field, invalid-input,
+cancel-midway, duplicate, state-transition.`;
+
+export interface ExplorePromptInput {
+  snapshot: Snapshot;
+  /** Elements on this page nothing has ever interacted with. */
+  untouched: { role: string; name: string }[];
+  /** Names of verified flows that already exercise this page. */
+  covered: string[];
+  max: number;
+}
+
+export function explorerUserMessage(input: ExplorePromptInput): string {
+  const sections = [`PAGE SNAPSHOT:`, renderSnapshot(input.snapshot), ``];
+  sections.push(
+    input.untouched.length
+      ? `NEVER INTERACTED WITH (${input.untouched.length}):\n` +
+          input.untouched.map((e) => `  ${e.role} "${e.name}"`).join("\n")
+      : `NEVER INTERACTED WITH: none — every element here has been used at least once.`,
+  );
+  sections.push(
+    ``,
+    input.covered.length
+      ? `ALREADY COVERED BY VERIFIED FLOWS (do not re-test these):\n` +
+          input.covered.map((n) => `  - ${n}`).join("\n")
+      : `ALREADY COVERED BY VERIFIED FLOWS: nothing yet.`,
+  );
+  sections.push(``, `Propose at most ${input.max} objectives for THIS page.`);
+  return sections.join("\n");
+}

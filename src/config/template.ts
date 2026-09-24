@@ -32,6 +32,10 @@ scope:
 ${include}
   exclude: []
   #  - "*/admin/**"
+  # \`magpie run --explore\` drives this app without being told what to test, so
+  # these two lists are the only thing standing between it and a page you did
+  # not want touched. Explore against staging, never production, and exclude
+  # anything destructive before the first exploratory run.
 
 # Elements the agent is never allowed to click (case-insensitive substring
 # match against the element's accessible name).
@@ -52,6 +56,13 @@ model:
   # Override model IDs if a provider retires one:
   # ids:
   #   gemini: gemini-3.1-flash-lite
+
+# Exploration (\`magpie run --explore\`).
+explore:
+  # How many never-visited pages one session may pick up from the frontier.
+  max_new_pages: 8
+  # Objectives generated per page — one model call produces them all.
+  max_objectives_per_page: 3
 
 run:
   headed: false

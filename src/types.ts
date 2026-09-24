@@ -32,6 +32,8 @@ export interface MagpieConfig {
   run: { headed: boolean; slow_network_grace_ms: number };
   /** Regression mode (Phase 3). Healing is off unless asked for. */
   regress: { heal: boolean; max_heal_calls: number };
+  /** Explore mode (Phase 4). Budgets still decide where the crawl stops. */
+  explore: { max_new_pages: number; max_objectives_per_page: number };
 }
 
 export interface ElementRef {
@@ -127,6 +129,8 @@ export interface Objective {
   technique: Technique;
   status: "planned" | "in-progress" | "passed" | "finding" | "blocked";
   note?: string;
+  /** Explore only: the page this objective was generated for. */
+  page?: string;
 }
 
 export type SessionStatus =

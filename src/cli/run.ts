@@ -7,8 +7,17 @@ import { runSession } from "../harness/session.js";
 import { writeHtmlReport } from "../report/html.js";
 import { renderTerminalReport } from "../report/terminal.js";
 
+/**
+ * What an exploratory session's "charter" says. It appears in the report header
+ * and in memory, so it has to read as an honest description of what happened.
+ */
+export const EXPLORE_CHARTER =
+  "Exploratory session — objectives were generated from the application itself.";
+
 export interface RunOptions {
   charter?: string;
+  /** Explore mode: no charter, objectives generated page by page (Phase 4). */
+  explore?: boolean;
   /** A flow slug or "all" — switches `run` into regression mode (Phase 3). */
   regress?: string;
   includeDraft?: boolean;
@@ -73,8 +82,18 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   }
 
   const dir = opts.dir ?? process.cwd();
-  const charter = opts.charter?.trim();
-  if (!charter) throw new ConfigError("--charter is required and must not be empty.");
+  if (opts.explore && opts.charter) {
+    throw new ConfigError(
+      "Use either --charter (test what you describe) or --explore (test what Magpie finds), not both.",
+    );
+  }
+  const charter = opts.explore ? EXPLORE_CHARTER : opts.charter?.trim();
+  if (!charter) {
+    throw new ConfigError(
+      "Nothing to do: pass --charter \"…\" to test something specific, --explore to let\n" +
+        "Magpie choose, or --regress to replay remembered flows.",
+    );
+  }
 
   const cfg = loadConfig(dir); // validates before the browser is launched
 
@@ -88,11 +107,12 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     );
   }
   console.log(`magpie: ${cfg.name} — ${cfg.base_url}`);
-  console.log(`charter: ${charter}\n`);
+  console.log(opts.explore ? `mode: explore\n` : `charter: ${charter}\n`);
 
   const result = await runSession({
     dir,
     charter,
+    ...(opts.explore ? { explore: true } : {}),
     authName: opts.as ?? "default",
     ...(opts.headed !== undefined ? { headed: opts.headed } : {}),
     narrate: (line) => console.log(line),

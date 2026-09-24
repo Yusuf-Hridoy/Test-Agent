@@ -32,8 +32,9 @@ program
 
 program
   .command("run")
-  .description("Run an instructed test session, or replay remembered flows")
+  .description("Test what you describe (--charter), what Magpie finds (--explore), or what it remembers (--regress)")
   .option("--charter <string>", "what the agent should test")
+  .option("--explore", "let Magpie choose what to test, page by page")
   .option("--regress <slug|all>", "replay remembered flows instead of exploring")
   .option("--include-draft", "with --regress all, also replay draft flows")
   .option("--heal", "let the model relocate a failed step (costs model calls)")

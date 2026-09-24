@@ -30,12 +30,19 @@ import { fingerprint, LoopDetector } from "./loopdetect.js";
 import { classifyActionResult, slowGrace, waitForRecovery } from "./envmon.js";
 import { ensureAuthenticated } from "./auth.js";
 import { ingestIntoMemory, readMemoryContext } from "../memory/record.js";
+import { openExplorer, type Explorer } from "../memory/explorer.js";
 import { normalizePageKey } from "../memory/pagekey.js";
 import { isoNow, sleep, stamp, truncate } from "../util.js";
 
 export interface SessionOptions {
   dir: string;
   charter: string;
+  /**
+   * Explore mode (Phase 4): objectives come from the pages themselves rather
+   * than from a charter. Everything else — harness, budgets, guards, evidence,
+   * ingestion — is the same session engine.
+   */
+  explore?: boolean;
   authName?: string;
   headed?: boolean;
   narrate?: (line: string) => void;
@@ -90,6 +97,7 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
   };
 
   let objectives: Objective[] = [];
+  let explorer: Explorer | undefined;
   let status: SessionStatus = "COMPLETED";
   let session: BrowserSession | undefined;
   let originWasReachable = false;
@@ -152,54 +160,118 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
 
     // ---- PLANNING --------------------------------------------------------
     let current = await snapshot(page);
-    // What previous sessions learned about this app, if anything (Phase 2).
-    const memory = readMemoryContext(opts.dir, opts.charter);
-    if (memory) narrate("planning with what previous sessions learned about this app");
-    try {
-      objectives = await planSession({
-        charter: opts.charter,
-        snapshot: current.snap,
-        cfg,
-        usage,
-        secrets,
-        log: narrate,
-        ...(memory ? { memory } : {}),
-        ...(opts.generate ? { generate: opts.generate } : {}),
-      });
-    } catch (err) {
-      if (err instanceof ModelExhaustedError && err.networkFailure) {
-        // The machine has no network: the app is unreachable too. That is an
-        // environment problem, not a planning failure.
-        status = "ENVIRONMENT_DOWN";
-        observe("environment_down", `no network while planning: ${err.message}`);
-        harnessStep("plan", "no network reaching any model provider", false, page.url());
-        checkpoint();
-        return finish();
+
+    if (opts.explore) {
+      // Explore plans page by page, so there is nothing to plan up front — only
+      // somewhere to start. The queue is deterministic (§1.3).
+      explorer = openExplorer(opts.dir, cfg);
+      budget.countStep();
+      harnessStep(
+        "explore_queue",
+        `${explorer.queue.length} page(s) queued: ${explorer.describe()}`,
+        true,
+        page.url(),
+      );
+      narrate(`exploring ${explorer.queue.length} page(s): ${explorer.describe()}`);
+      checkpoint();
+    } else {
+      // What previous sessions learned about this app, if anything (Phase 2).
+      const memory = readMemoryContext(opts.dir, opts.charter);
+      if (memory) narrate("planning with what previous sessions learned about this app");
+      try {
+        objectives = await planSession({
+          charter: opts.charter,
+          snapshot: current.snap,
+          cfg,
+          usage,
+          secrets,
+          log: narrate,
+          ...(memory ? { memory } : {}),
+          ...(opts.generate ? { generate: opts.generate } : {}),
+        });
+      } catch (err) {
+        if (err instanceof ModelExhaustedError && err.networkFailure) {
+          // The machine has no network: the app is unreachable too. That is an
+          // environment problem, not a planning failure.
+          status = "ENVIRONMENT_DOWN";
+          observe("environment_down", `no network while planning: ${err.message}`);
+          harnessStep("plan", "no network reaching any model provider", false, page.url());
+          checkpoint();
+          return finish();
+        }
+        if (err instanceof PlanFailedError || err instanceof ModelExhaustedError) {
+          // No provider answered → the session never started; that is a failed
+          // plan, not a crash, and the observation carries every attempt.
+          status = "PLAN_FAILED";
+          observe("plan_failed", err.message);
+          harnessStep("plan", truncate(err.message, 300), false, page.url());
+          checkpoint();
+          return finish();
+        }
+        throw err;
       }
-      if (err instanceof PlanFailedError || err instanceof ModelExhaustedError) {
-        // No provider answered → the session never started; that is a failed
-        // plan, not a crash, and the observation carries every attempt.
-        status = "PLAN_FAILED";
-        observe("plan_failed", err.message);
-        harnessStep("plan", truncate(err.message, 300), false, page.url());
-        checkpoint();
-        return finish();
-      }
-      throw err;
+      budget.countStep();
+      harnessStep("plan", `${objectives.length} objectives planned`, true, page.url());
+      for (const o of objectives) narrate(`  ${o.id} [${o.technique}] ${o.description}`);
+      checkpoint();
     }
-    budget.countStep();
-    harnessStep("plan", `${objectives.length} objectives planned`, true, page.url());
-    for (const o of objectives) narrate(`  ${o.id} [${o.technique}] ${o.description}`);
-    checkpoint();
 
     // ---- EXECUTING -------------------------------------------------------
-    objectives: for (const objective of objectives) {
+    objectives: for (;;) {
       const hitBefore = budget.hit();
       if (hitBefore) {
         status = "BUDGET_EXHAUSTED";
         narrate(`${describeBudgetHit(hitBefore)} — finalizing`);
         break;
       }
+
+      let objective = objectives.find((o) => o.status === "planned");
+
+      // Explore refills the list one page at a time: walk to the next queued
+      // page, ask what is worth testing there, then execute those objectives
+      // on the ordinary loop. Budgets are the crawl horizon (§1.3).
+      if (!objective && explorer) {
+        const next = explorer.take();
+        if (!next) {
+          narrate("\nnothing left on the queue — finalizing");
+          break;
+        }
+        narrate(`\n◆ ${next.pageKey} (${next.reason})`);
+        const arrival = await actions.goto(
+          { page, cfg, snap: current.snap, locators: current.locators, secrets },
+          next.url,
+        );
+        budget.countStep();
+        harnessStep("explore_visit", `${next.reason}: ${arrival.detail}`, arrival.ok, page.url());
+        if (!arrival.ok) {
+          observe("explore_page_unreachable", `${next.url}: ${arrival.detail}`);
+          narrate(`  could not open this page — skipping it`);
+          continue;
+        }
+        current = await snapshot(page);
+        const generated = await explorer.objectivesFor({
+          snapshot: current.snap,
+          startIndex: objectives.length,
+          cfg,
+          usage,
+          secrets,
+          log: narrate,
+          ...(opts.generate ? { generate: opts.generate } : {}),
+        });
+        if (generated.problem) observe("explore_generation_failed", generated.problem);
+        if (!generated.objectives.length) {
+          narrate("  nothing worth testing here");
+          continue;
+        }
+        objectives.push(...generated.objectives);
+        for (const o of generated.objectives) {
+          narrate(`  ${o.id} [${o.technique}] ${o.description}`);
+        }
+        checkpoint();
+        objective = generated.objectives[0];
+      }
+
+      if (!objective) break;
 
       objective.status = "in-progress";
       narrate(`\n▶ ${objective.id} ${objective.description}`);
@@ -588,6 +660,17 @@ export async function runSession(opts: SessionOptions): Promise<SessionResult> {
           narrate("  loop detector: page unchanged across several actions");
         }
         checkpoint();
+      }
+
+      // Pages discovered while working are appended to this session's queue:
+      // exploration that ignored what it just found would keep re-walking the
+      // same map (§1.3).
+      if (explorer) {
+        const added = explorer.discover(pageSnapshots);
+        if (added.length) {
+          narrate(`  queued ${added.length} newly discovered page(s)`);
+          harnessStep("explore_discovered", added.join(", "), true, current.snap.url);
+        }
       }
 
       checkpoint();

@@ -19,6 +19,9 @@ export const DEFAULT_BUDGET = { max_steps: 80, max_llm_requests: 60, max_minutes
 /** Healing is opt-in and bounded (PHASE-3-BRIEF §1.6). */
 export const DEFAULT_REGRESS = { heal: false, max_heal_calls: 10 };
 
+/** Exploration shape (PHASE-4-BRIEF §1.3); budgets remain the real horizon. */
+export const DEFAULT_EXPLORE = { max_new_pages: 8, max_objectives_per_page: 3 };
+
 export const providerSchema = z.enum(["gemini", "groq", "mistral"]);
 
 export const configSchema = z
@@ -77,6 +80,16 @@ export const configSchema = z
       .object({
         heal: z.boolean().default(DEFAULT_REGRESS.heal),
         max_heal_calls: z.number().int().nonnegative().default(DEFAULT_REGRESS.max_heal_calls),
+      })
+      .default({}),
+    explore: z
+      .object({
+        max_new_pages: z.number().int().positive().default(DEFAULT_EXPLORE.max_new_pages),
+        max_objectives_per_page: z
+          .number()
+          .int()
+          .positive()
+          .default(DEFAULT_EXPLORE.max_objectives_per_page),
       })
       .default({}),
   })
