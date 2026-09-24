@@ -4,10 +4,12 @@ A remembered flow replays with **no model calls**, so a nightly regression run
 costs nothing but the minutes it takes. This page is the whole setup.
 
 ```bash
-magpie run --regress all --json > suite.json
+magpie run --regress all --fail-on-skipped --json > suite.json
 ```
 
-Exit code `0` means every flow that ran passed. Anything else is worth a look.
+Exit code `0` means every flow ran and passed. Anything else is worth a look.
+`--fail-on-skipped` is what makes that sentence true — see
+[below](#a-broken-flow-must-not-make-ci-green).
 
 ---
 
@@ -77,7 +79,7 @@ jobs:
 
       - name: Replay every verified flow
         working-directory: tests/magpie
-        run: npx magpie run --regress all --json > suite.json
+        run: npx magpie run --regress all --fail-on-skipped --json > suite.json
 
       # Always upload: the evidence matters most when the step failed.
       - name: Upload evidence
@@ -107,22 +109,30 @@ you get the human summary on stdout instead.
           test "$new" -eq 0
 ```
 
-### Watch the skipped count, not just the exit code
+### A broken flow must not make CI green
 
-A `broken` flow is **skipped**, and skipping is not failing — so a suite whose
-flows have all broken exits `0` while testing nothing at all. That is the one
-way this design can go quietly green, and it is worth one line of defence:
+A `broken` flow is **skipped**, and skipping is not failing — so without
+`--fail-on-skipped` a suite whose flows have all broken exits `0` while testing
+nothing at all. That is the one way this design can go quietly green, so pass
+the flag in CI:
 
-```yaml
-      - name: Refuse to pass while flows are broken
-        working-directory: tests/magpie
-        run: |
-          jq -e '.totals.skipped == 0' suite.json \
-            || { echo "::warning::flows are broken and were not replayed"; exit 1; }
+```bash
+magpie run --regress all --fail-on-skipped
 ```
 
-Either fix those flows (`--heal`, or re-record the charter) or delete them. A
-regression suite that shrinks silently is worse than no suite.
+With it, the suite exits `1` if any flow was skipped **or** if no flow ran at
+all (an empty memory, or a cold cache that restored nothing). Either fix the
+broken flows (`--heal`, or re-record the charter) or delete them. A regression
+suite that shrinks silently is worse than no suite.
+
+Without the flag the suite still says so, on the last line of its summary:
+
+```
+⚠ 3 flows skipped — suite exercised 0 of 3 (use --fail-on-skipped to make this exit 1)
+```
+
+The flag is off by default because the exit codes below are a published
+contract; in CI you almost certainly want it on.
 
 ## Cron (a plain server)
 
@@ -139,7 +149,7 @@ regression suite that shrinks silently is worse than no suite.
 | Code | Meaning | Typical cause |
 |------|---------|---------------|
 | `0` | every flow that ran passed | nothing to do |
-| `1` | at least one flow **failed or was healed** | a real regression, or a flow a model had to repair |
+| `1` | at least one flow **failed or was healed** — or, with `--fail-on-skipped`, was skipped or never ran | a real regression, a flow a model had to repair, or a suite that has quietly stopped covering anything |
 | `2` | the environment | the app was unreachable; remaining flows are marked `UNTESTED` and the suite stops |
 | `3` | configuration or auth | no such flow, bad config, expired session, or a flow blocked by a guard |
 
@@ -172,7 +182,8 @@ job that looks like it is still working.
   "selection": {
     "requested": "all",       // the --regress argument: "all" or a slug
     "includeDraft": false,    // --include-draft
-    "heal": false             // --heal, or regress.heal in the config
+    "heal": false,            // --heal, or regress.heal in the config
+    "failOnSkipped": true     // --fail-on-skipped
   },
 
   "totals": {
@@ -238,6 +249,9 @@ job that looks like it is still working.
 
 Two fields deserve emphasis:
 
+- **`totals.skipped`** is the coverage number. Anything above zero means the
+  suite tested less than it was meant to; `--fail-on-skipped` turns that into a
+  non-zero exit, and `passed + failed + refused + healed` is what actually ran.
 - **`status`** on a finding is what makes a nightly suite readable. `NEW` is
   what broke since the last run; `KNOWN` has been reported before and carries
   `seenCount` and `firstSeenAt`. Gate your build on `NEW` if a known-broken flow

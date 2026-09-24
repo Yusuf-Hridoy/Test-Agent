@@ -56,7 +56,7 @@ export interface SuiteResult {
   startedAt: string;
   endedAt: string;
   durationMs: number;
-  selection: { requested: string; includeDraft: boolean; heal: boolean };
+  selection: { requested: string; includeDraft: boolean; heal: boolean; failOnSkipped: boolean };
   totals: {
     total: number;
     passed: number;
@@ -124,6 +124,7 @@ export const suiteSchema = z.object({
     requested: z.string(),
     includeDraft: z.boolean(),
     heal: z.boolean(),
+    failOnSkipped: z.boolean(),
   }),
   totals: z.object({
     total: z.number(),
@@ -170,6 +171,8 @@ export interface RegressOptions {
   requested: string;
   includeDraft?: boolean;
   heal?: boolean;
+  /** Treat a shrinking suite as a failure: see exitCodeFor. */
+  failOnSkipped?: boolean;
   headed?: boolean;
   authName?: string;
   /** Progress lines. In --json mode the CLI sends these to stderr. */
@@ -422,6 +425,7 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
       requested: opts.requested,
       includeDraft: Boolean(opts.includeDraft),
       heal: healingOn,
+      failOnSkipped: Boolean(opts.failOnSkipped),
     },
     totals,
     flows,
@@ -429,7 +433,7 @@ export async function runRegression(opts: RegressOptions): Promise<SuiteResult> 
     usage: usage.snapshot(),
     healCalls,
     environmentDown,
-    exitCode: exitCodeFor(totals, environmentDown),
+    exitCode: exitCodeFor(totals, environmentDown, Boolean(opts.failOnSkipped)),
     reportDir,
   };
 
@@ -494,14 +498,54 @@ export function tally(flows: SuiteFlowResult[]): SuiteResult["totals"] {
   };
 }
 
+/** Flows that actually ran — the number that says how much was tested. */
+export function executedCount(totals: SuiteResult["totals"]): number {
+  return totals.passed + totals.failed + totals.refused + totals.healed;
+}
+
 /**
  * 0 everything that ran passed · 1 something failed or was healed · 2 the
  * environment · 3 configuration. A healed flow exits 1 on purpose: it ran, but
  * nobody has yet shown the application still does what the flow asserts.
+ *
+ * With `failOnSkipped`, a suite that skipped anything — or ran nothing at all —
+ * also exits 1. Skipping is not failing, so without the flag a suite whose
+ * flows have all broken exits 0 while testing nothing; that is the one way this
+ * design can go quietly green. The flag is off by default because the exit
+ * codes above are a published contract.
+ *
+ * It is checked last so the more specific codes keep their meaning: an
+ * unreachable environment (2) and a guard refusal (3) each need a different fix
+ * from "your flows have rotted".
  */
-export function exitCodeFor(totals: SuiteResult["totals"], environmentDown: boolean): number {
+export function exitCodeFor(
+  totals: SuiteResult["totals"],
+  environmentDown: boolean,
+  failOnSkipped = false,
+): number {
   if (environmentDown || totals.untested > 0) return 2;
   if (totals.failed > 0 || totals.healed > 0) return 1;
   if (totals.refused > 0) return 3;
+  if (failOnSkipped && (totals.skipped > 0 || executedCount(totals) === 0)) return 1;
   return 0;
+}
+
+/**
+ * The line a nightly report must not be allowed to bury: how much of the suite
+ * actually ran. Empty when everything ran, so a healthy suite stays quiet.
+ */
+export function skipWarning(totals: SuiteResult["totals"]): string {
+  const executed = executedCount(totals);
+  if (totals.skipped > 0) {
+    return (
+      `⚠ ${totals.skipped} flow${totals.skipped === 1 ? "" : "s"} skipped — ` +
+      `suite exercised ${executed} of ${totals.total}`
+    );
+  }
+  if (executed === 0) {
+    return totals.total === 0
+      ? "⚠ no flows were replayed — this project has nothing to regress against"
+      : `⚠ no flows were replayed — suite exercised 0 of ${totals.total}`;
+  }
+  return "";
 }

@@ -37,6 +37,7 @@ program
   .option("--regress <slug|all>", "replay remembered flows instead of exploring")
   .option("--include-draft", "with --regress all, also replay draft flows")
   .option("--heal", "let the model relocate a failed step (costs model calls)")
+  .option("--fail-on-skipped", "with --regress, exit 1 if any flow was skipped or none ran")
   .option("--json", "with --regress, print suite.json to stdout and logs to stderr")
   .option("--as <name>", "auth profile name", "default")
   .option("--headed", "show the browser window")

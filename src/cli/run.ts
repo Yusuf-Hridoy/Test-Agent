@@ -13,6 +13,7 @@ export interface RunOptions {
   regress?: string;
   includeDraft?: boolean;
   heal?: boolean;
+  failOnSkipped?: boolean;
   json?: boolean;
   as?: string;
   headed?: boolean;

@@ -8,8 +8,17 @@ import { _resetRateLimiter } from "../../model/ask.js";
 import { PROVIDERS } from "../../types.js";
 import { closeDb, flowBySlug, listFlows, openMemoryDb, type MemoryDb } from "../db.js";
 import { replayFlow } from "../replay.js";
-import { exitCodeFor, runRegression, selectFlows, suiteSchema, tally } from "../regress.js";
+import {
+  executedCount,
+  exitCodeFor,
+  runRegression,
+  selectFlows,
+  skipWarning,
+  suiteSchema,
+  tally,
+} from "../regress.js";
 import { renderSuiteReport } from "../../report/suite.js";
+import { renderSuiteTerminal } from "../../report/terminal.js";
 
 const ENTER = "enter-the-shop-from-the-landing-page";
 const ADD = "adding-an-item-updates-the-cart-badge";
@@ -184,9 +193,57 @@ describe("regression suite (P3-T2)", () => {
     expect(exitCodeFor({ ...base, untested: 1 }, false)).toBe(2);
     expect(exitCodeFor({ ...base, passed: 1 }, true)).toBe(2);
     expect(exitCodeFor({ ...base, refused: 1 }, false)).toBe(3);
-    // A suite where everything was skipped has not failed.
+    // A suite where everything was skipped has not failed…
     expect(exitCodeFor({ ...base, skipped: 1 }, false)).toBe(0);
+    // …unless the caller says a shrinking suite is itself a failure.
+    expect(exitCodeFor({ ...base, skipped: 1 }, false, true)).toBe(1);
+    expect(exitCodeFor({ ...base, passed: 1 }, false, true)).toBe(0);
+    // Nothing selected at all (cold cache, empty memory) counts too.
+    expect(exitCodeFor({ ...base, total: 0 }, false, true)).toBe(1);
+    // The more specific codes keep their meaning: they need different fixes.
+    expect(exitCodeFor({ ...base, skipped: 1, untested: 1 }, false, true)).toBe(2);
+    expect(exitCodeFor({ ...base, skipped: 1, refused: 1 }, false, true)).toBe(3);
   });
+
+  it("counts what actually ran, and warns when that is less than the suite", () => {
+    const base = { total: 4, passed: 0, failed: 0, refused: 0, healed: 0, skipped: 4, untested: 0 };
+    expect(executedCount(base)).toBe(0);
+    expect(skipWarning(base)).toBe("⚠ 4 flows skipped — suite exercised 0 of 4");
+    expect(skipWarning({ ...base, total: 5, passed: 1 })).toBe(
+      "⚠ 4 flows skipped — suite exercised 1 of 5",
+    );
+    expect(skipWarning({ ...base, skipped: 1, total: 1 })).toBe(
+      "⚠ 1 flow skipped — suite exercised 0 of 1",
+    );
+    expect(skipWarning({ ...base, total: 0, skipped: 0 })).toMatch(/nothing to regress against/);
+    // A healthy suite stays quiet.
+    expect(skipWarning({ ...base, skipped: 0, passed: 4 })).toBe("");
+  });
+
+  it("exits 1 on a suite that exercised nothing — but only when asked", async () => {
+    // Every flow broken: the suite still "passes" because skipping is not
+    // failing, which is exactly the way this design can go quietly green.
+    db.prepare("UPDATE flows SET status = 'broken'").run();
+
+    const quiet = await runRegression({ dir, requested: "all" });
+    expect(quiet.totals.skipped).toBe(3);
+    expect(executedCount(quiet.totals)).toBe(0);
+    expect(quiet.exitCode).toBe(0);
+    expect(quiet.selection.failOnSkipped).toBe(false);
+
+    // …but it says so loudly, on the last line where a reader will see it.
+    const summary = renderSuiteTerminal(quiet, "/tmp/report.html");
+    expect(summary.trimEnd().split("\n").at(-1)).toBe(
+      "⚠ 3 flows skipped — suite exercised 0 of 3 (use --fail-on-skipped to make this exit 1)",
+    );
+
+    const strict = await runRegression({ dir, requested: "all", failOnSkipped: true });
+    expect(strict.exitCode).toBe(1);
+    expect(strict.selection.failOnSkipped).toBe(true);
+    // With the flag on, the hint to turn it on would be noise.
+    expect(renderSuiteTerminal(strict, "/tmp/report.html")).not.toContain("--fail-on-skipped to make");
+    expect(suiteSchema.safeParse(JSON.parse(JSON.stringify(strict))).success).toBe(true);
+  }, 300_000);
 
   it("counts outcomes without double-counting", () => {
     expect(

@@ -2,7 +2,7 @@ import path from "node:path";
 import { ConfigError, loadConfig } from "../config/load.js";
 import { API_KEY_ENV, apiKeyFor } from "../model/providers.js";
 import { PROVIDERS } from "../types.js";
-import { runRegression, RegressError, type SuiteResult } from "../memory/regress.js";
+import { runRegression, RegressError, skipWarning, type SuiteResult } from "../memory/regress.js";
 import { writeSuiteReport } from "../report/suite.js";
 import { renderSuiteTerminal } from "../report/terminal.js";
 import type { RunOptions } from "./run.js";
@@ -49,6 +49,7 @@ export async function regressCommand(opts: RunOptions): Promise<void> {
       requested,
       ...(opts.includeDraft !== undefined ? { includeDraft: opts.includeDraft } : {}),
       ...(opts.heal !== undefined ? { heal: opts.heal } : {}),
+      ...(opts.failOnSkipped !== undefined ? { failOnSkipped: opts.failOnSkipped } : {}),
       ...(opts.headed !== undefined ? { headed: opts.headed } : {}),
       ...(opts.as ? { authName: opts.as } : {}),
       narrate: log,
@@ -63,6 +64,9 @@ export async function regressCommand(opts: RunOptions): Promise<void> {
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     console.error(`\nreport    ${htmlPath}`);
+    // stdout is the document; the warning is for the human reading the log.
+    const warning = skipWarning(result.totals);
+    if (warning) console.error(warning);
   } else {
     console.log(renderSuiteTerminal(result, htmlPath));
   }

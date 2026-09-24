@@ -1,5 +1,6 @@
 import type { SessionResult } from "../types.js";
 import { truncate } from "../util.js";
+import { skipWarning } from "../memory/regress.js";
 
 const ICON: Record<string, string> = {
   planned: "·",
@@ -131,5 +132,15 @@ export function renderSuiteTerminal(
   lines.push("");
   lines.push(`report    ${htmlPath}`);
   lines.push(`suite     ${result.reportDir}/suite.json`);
+  // Last line on purpose: how much of the suite actually ran is the thing a
+  // reader skims to, and a shrinking suite must not hide above the paths.
+  const warning = skipWarning(result.totals);
+  if (warning) {
+    lines.push("");
+    lines.push(
+      warning +
+        (result.selection.failOnSkipped ? "" : " (use --fail-on-skipped to make this exit 1)"),
+    );
+  }
   return lines.join("\n");
 }

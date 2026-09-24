@@ -88,7 +88,7 @@ reports/2026-09-16_14-32-05/
 | `magpie memory stats` | Database size, totals, schema version |
 | `magpie flows list` | Every remembered flow: status, steps, last replay |
 | `magpie flows show <slug>` | One flow's steps, in the order replay runs them |
-| `magpie run --regress all [--include-draft] [--heal] [--json]` | Replay remembered flows as a suite — **no model calls** unless you pass `--heal` |
+| `magpie run --regress all [--fail-on-skipped] [--include-draft] [--heal] [--json]` | Replay remembered flows as a suite — **no model calls** unless you pass `--heal` |
 | `magpie flows replay <slug> [--headed] [--as <name>]` | Replay one flow against the live app — **no model calls** |
 | `magpie flows verify <slug>` | Replay, and promote the flow to `verified` if it passes |
 | `magpie flows rename <slug> <new name>` | Give a flow a human name |
@@ -261,7 +261,9 @@ Once flows are remembered, a whole suite of them replays for nothing:
 magpie run --regress all                  # every verified flow, no model calls
 magpie run --regress all --include-draft  # …and the ones not yet proven
 magpie run --regress add-item-to-cart     # just this one, whatever its status
-magpie run --regress all --json > suite.json   # machine-readable, for CI
+
+# In CI: machine-readable, and red if the suite has quietly stopped covering anything
+magpie run --regress all --fail-on-skipped --json > suite.json
 ```
 
 ```
@@ -278,8 +280,17 @@ findings  1 new · 0 known
 ```
 
 **Nothing is quietly dropped.** A `broken` flow is listed as SKIPPED with the
-reason rather than disappearing from the suite — a regression run that silently
-shrinks as flows break is one that reports green while covering less and less.
+reason rather than disappearing from the suite, and the last line of the summary
+says how much actually ran:
+
+```
+⚠ 3 flows skipped — suite exercised 0 of 3 (use --fail-on-skipped to make this exit 1)
+```
+
+Skipping is not failing, so by default such a suite still exits `0`. Pass
+**`--fail-on-skipped`** — as you should in CI — and it exits `1` when any flow
+was skipped or none ran at all. A regression run that silently shrinks as flows
+break is one that reports green while covering less and less.
 
 ### The regression oracle
 
