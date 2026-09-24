@@ -24,6 +24,8 @@ export interface MagpieConfig {
     ids?: Partial<Record<Provider, string>>;
   };
   run: { headed: boolean; slow_network_grace_ms: number };
+  /** Regression mode (Phase 3). Healing is off unless asked for. */
+  regress: { heal: boolean; max_heal_calls: number };
 }
 
 export interface ElementRef {
@@ -61,7 +63,11 @@ export type Oracle =
   | "http_5xx"
   | "http_4xx_unexpected"
   | "crash"
-  | "llm_judgment";
+  | "llm_judgment"
+  /** A flow that used to pass no longer does (Phase 3). */
+  | "regression"
+  /** The same page has needed extra time to respond across several sessions. */
+  | "performance";
 
 export type Severity = "high" | "medium" | "low";
 
@@ -78,6 +84,16 @@ export interface Finding {
   screenshots: string[]; // paths relative to the report dir
   console?: string[];
   network?: string[];
+  /**
+   * What project memory knows about this defect (Phase 3). Absent when the
+   * session was not ingested — a report never claims history it does not have.
+   */
+  memory?: {
+    status: "NEW" | "KNOWN";
+    /** How many sessions have reported this same defect, including this one. */
+    seenCount: number;
+    firstSeenAt?: string;
+  };
 }
 
 export type Technique =
@@ -118,7 +134,8 @@ export interface SessionResult {
   charter: string;
   objectives: Objective[];
   findings: Finding[];
-  observations: { type: string; detail: string }[];
+  /** `pageKey` is set when the observation is about one page (Phase 3 oracles). */
+  observations: { type: string; detail: string; pageKey?: string }[];
   usage: Record<Provider, ProviderUsage>;
   stepCount: number;
   reportDir: string;

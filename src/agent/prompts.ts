@@ -171,3 +171,62 @@ export function capSnapshot(rendered: string, limit: number): string {
   lines.push("[element list truncated to fit the context budget]");
   return lines.join("\n").slice(0, limit);
 }
+
+/**
+ * Healer system prompt (PHASE-3-BRIEF §1.6). One question, one answer: is the
+ * element this step needs still on the page under a different label?
+ */
+export const HEAL_SYSTEM_PROMPT = `You are Magpie's flow healer. A saved regression flow just failed at one step
+because the element it targets could not be found. Your ONE job is to decide
+whether that element still exists under a different label, and if so, where.
+
+You are given the flow's purpose, the step that failed, the target that used to
+work, and a snapshot of the page as it is right now.
+
+Rules:
+1. Relocate ONLY to an element that plays the same role in the same task. A
+   different control that happens to sit nearby is not the same element.
+2. If the element is genuinely gone — the feature was removed, the page is not
+   the one expected, the app is showing an error — answer "broken". That is a
+   useful answer, not a failure: a real defect reported honestly is worth more
+   than a test quietly repaired.
+3. Never relocate to anything that logs out, deletes data, pays, or leaves the
+   application. Such a target will be refused anyway.
+4. "nth" is 0-based and only needed when several elements share a name.
+5. Answer with STRICT JSON ONLY — no prose, no code fences — shaped exactly:
+   {"verdict":"relocated","target":{"role":"button","name":"Add to basket","nth":0},"note":"the button was renamed"}
+   or
+   {"verdict":"broken","note":"the checkout button is gone and the page shows a 500"}`;
+
+export interface HealPromptInput {
+  flowName: string;
+  flowDescription?: string | null;
+  seq: number;
+  action: string;
+  oldRole: string | null;
+  oldName: string | null;
+  oldNth: number | null;
+  /** Already placeholderized: a secret value is never sent. */
+  value: string | null;
+  reason: string;
+  snapshot: Snapshot;
+}
+
+export function healUserMessage(input: HealPromptInput): string {
+  const lines = [
+    `FLOW: ${input.flowName}`,
+    ...(input.flowDescription ? [`RECORDED FOR: ${input.flowDescription}`] : []),
+    ``,
+    `FAILED STEP ${input.seq}: ${input.action}`,
+    `  target that used to work: role=${input.oldRole ?? "?"} name="${input.oldName ?? ""}"` +
+      (input.oldNth === null ? "" : ` nth=${input.oldNth}`),
+    ...(input.value !== null ? [`  value it types/selects: ${input.value}`] : []),
+    `  why it failed: ${input.reason}`,
+    ``,
+    `THE PAGE RIGHT NOW:`,
+    renderSnapshot(input.snapshot),
+    ``,
+    `Has this element moved, or is the flow genuinely broken?`,
+  ];
+  return lines.join("\n");
+}

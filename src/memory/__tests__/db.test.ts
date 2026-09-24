@@ -2,7 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { closeDb, counts, hasMemory, memoryDbPath, openMemoryDb, schemaVersion } from "../db.js";
+import Database from "better-sqlite3";
+import {
+  closeDb,
+  counts,
+  hasMemory,
+  memoryDbPath,
+  MIGRATIONS,
+  openMemoryDb,
+  SCHEMA_VERSION,
+  schemaVersion,
+} from "../db.js";
 
 const dirs: string[] = [];
 function tmpProject(): string {
@@ -21,7 +31,7 @@ describe("memory database", () => {
     const db = openMemoryDb(dir);
     expect(fs.existsSync(memoryDbPath(dir))).toBe(true);
     expect(memoryDbPath(dir)).toBe(path.join(dir, "memory", "magpie.db"));
-    expect(schemaVersion(db)).toBe(1);
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
     expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
     closeDb(db);
   });
@@ -40,6 +50,10 @@ describe("memory database", () => {
       "flow_steps",
       "findings",
       "idx_findings_page",
+      // migration 002
+      "observations",
+      "heal_events",
+      "idx_obs_page",
     ]) {
       expect(names, expected).toContain(expected);
     }
@@ -55,12 +69,44 @@ describe("memory database", () => {
     closeDb(first);
 
     const second = openMemoryDb(dir);
-    expect(schemaVersion(second)).toBe(1);
+    expect(schemaVersion(second)).toBe(SCHEMA_VERSION);
     // A second migration pass would have thrown on CREATE TABLE, and the row
     // written before the reopen must survive.
     expect(counts(second).sessions).toBe(1);
     const versions = second.prepare("SELECT COUNT(*) AS n FROM schema_version").get() as { n: number };
     expect(versions.n).toBe(1);
+    closeDb(second);
+  });
+
+  it("migrates a v1 database in place, keeping its rows", () => {
+    // A project that last ran on Phase 2 must gain the new columns, not a new DB.
+    const dir = tmpProject();
+    const file = memoryDbPath(dir);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const v1 = new Database(file);
+    v1.exec("CREATE TABLE IF NOT EXISTS schema_version (v INTEGER NOT NULL)");
+    v1.exec(MIGRATIONS[0]!); // exactly what Phase 2 shipped, nothing more
+    v1.prepare("INSERT INTO schema_version (v) VALUES (1)").run();
+    const now = "2026-09-23T10:00:00+02:00";
+    const flow = v1
+      .prepare("INSERT INTO flows (slug, name, start_page_key, created_at, updated_at) VALUES (?,?,?,?,?)")
+      .run("legacy-flow", "Legacy flow", "shop.test/", now, now);
+    v1.prepare("INSERT INTO flow_steps (flow_id, seq, action, target_name) VALUES (?,?,?,?)").run(
+      flow.lastInsertRowid,
+      1,
+      "click",
+      "Add to cart",
+    );
+    v1.close();
+
+    const second = openMemoryDb(dir);
+    expect(schemaVersion(second)).toBe(SCHEMA_VERSION);
+    const step = second.prepare("SELECT * FROM flow_steps WHERE seq = 1").get() as {
+      target_name: string;
+      target_nth: number | null;
+    };
+    expect(step.target_name).toBe("Add to cart");
+    expect(step.target_nth).toBeNull(); // legacy rows stay legacy
     closeDb(second);
   });
 

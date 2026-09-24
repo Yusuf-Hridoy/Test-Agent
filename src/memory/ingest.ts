@@ -7,6 +7,7 @@ import { isoNow, slug, truncate } from "../util.js";
 import type { MemoryDb } from "./db.js";
 import { normalizePageKey } from "./pagekey.js";
 import { isReplayableAction, SECRET_PLACEHOLDER, type FlowStepRow } from "./types.js";
+import { fingerprintOf } from "./fingerprint.js";
 
 /** How many collision suffixes to try before giving up on a slug. */
 const MAX_SLUG_ATTEMPTS = 50;
@@ -28,7 +29,26 @@ export interface IngestResult {
   /** Slugs of flows created by this ingest (existing identical flows are reused). */
   flowsCreated: string[];
   flowsSkipped: string[];
+  /** Per-finding verdict from the cross-session dedup (§1.5). */
+  verdicts: FindingVerdict[];
+  /** Findings this ingest raised on its own, e.g. the performance oracle. */
+  raised: FindingVerdict[];
 }
+
+export interface FindingVerdict {
+  fid: string;
+  title: string;
+  oracle: string;
+  pageKey: string | null;
+  fingerprint: string;
+  status: "NEW" | "KNOWN";
+  /** How many sessions have now reported this same defect. */
+  seenCount: number;
+  firstSeenAt?: string;
+}
+
+/** How many consecutive slow visits to one page before it is worth reporting. */
+export const SLOW_PAGE_THRESHOLD = 3;
 
 /**
  * Fold one finished session into the project's memory.
@@ -58,6 +78,8 @@ export function ingestSession(
       findings: 0,
       flowsCreated: [],
       flowsSkipped: [],
+      verdicts: [],
+      raised: [],
     };
   }
 
@@ -105,24 +127,30 @@ export function ingestSession(
       if (key) keyForStep.set(step.n, key);
     }
     let findings = 0;
+    const verdicts: FindingVerdict[] = [];
     for (const finding of result.findings ?? []) {
       // The step that fired the oracle is the last of the repro trail.
       const lastStep = [...finding.steps].sort((a, b) => a - b).at(-1);
       const pageKey = lastStep !== undefined ? (keyForStep.get(lastStep) ?? null) : null;
-      db.prepare(
-        "INSERT INTO findings (session_id, fid, title, severity, oracle, confidence, page_key, created_at) VALUES (?,?,?,?,?,?,?,?)",
-      ).run(
-        sessionId,
-        finding.id,
-        clean(finding.title),
-        finding.severity,
-        finding.oracle,
-        finding.confidence,
-        pageKey,
-        now,
+      verdicts.push(
+        recordFinding(db, {
+          sessionId,
+          fid: finding.id,
+          title: clean(finding.title),
+          severity: finding.severity,
+          oracle: finding.oracle,
+          confidence: finding.confidence,
+          pageKey,
+          now,
+        }),
       );
       findings++;
     }
+
+    // Observations are memory too: the performance oracle is only possible
+    // because "this page was slow" survives the session that noticed it.
+    recordObservations(db, sessionId, result.observations ?? [], visits, now, clean);
+    const raised = raisePerformanceFindings(db, sessionId, visits, now);
 
     const flowsCreated: string[] = [];
     const flowsSkipped: string[] = [];
@@ -145,6 +173,8 @@ export function ingestSession(
       findings,
       flowsCreated,
       flowsSkipped,
+      verdicts,
+      raised,
     };
   })();
 }
@@ -233,6 +263,7 @@ export function stepsForFlow(actions: FlowAction[], clean: (t: string) => string
       target_name: a.target ? clean(a.target.name) : null,
       value: valueFor(a, clean),
       url_after: a.url ? normalizePageKey(a.url) : null,
+      target_nth: a.targetNth ?? null,
     }));
 }
 
@@ -246,11 +277,34 @@ function valueFor(action: FlowAction, clean: (t: string) => string): string | nu
   return value.includes(REDACTED) ? SECRET_PLACEHOLDER : value;
 }
 
-/** Two flows are "the same flow" when their replayable steps are identical. */
+/**
+ * Two flows are "the same flow" when their replayable steps are identical.
+ *
+ * `target_nth` is deliberately NOT part of the identity: a flow re-recorded
+ * after Phase 3 is the same flow, now with a position recorded. Including it
+ * would fork every legacy flow into a "-2" twin on the next run.
+ */
 export function signatureOf(steps: NewStep[] | FlowStepRow[]): string {
   return JSON.stringify(
     steps.map((s) => [s.action, s.target_role, s.target_name, s.value, s.url_after]),
   );
+}
+
+/**
+ * A fresher recording of a known flow can teach it where its targets are.
+ * Only fills gaps — a position already recorded is never overwritten by ingest,
+ * because the stored one may have been repaired by healing.
+ */
+function adoptPositions(db: MemoryDb, flowId: number, steps: NewStep[]): number {
+  let taught = 0;
+  const update = db.prepare(
+    "UPDATE flow_steps SET target_nth = ? WHERE flow_id = ? AND seq = ? AND target_nth IS NULL",
+  );
+  for (const s of steps) {
+    if (s.target_nth === null) continue;
+    taught += update.run(s.target_nth, flowId, s.seq).changes;
+  }
+  return taught;
 }
 
 function storeFlow(
@@ -293,10 +347,20 @@ function storeFlow(
           ).lastInsertRowid,
       );
       const insert = db.prepare(
-        "INSERT INTO flow_steps (flow_id, seq, action, target_role, target_name, value, url_after) VALUES (?,?,?,?,?,?,?)",
+        `INSERT INTO flow_steps (flow_id, seq, action, target_role, target_name, value, url_after, target_nth)
+         VALUES (?,?,?,?,?,?,?,?)`,
       );
       for (const s of steps) {
-        insert.run(flowId, s.seq, s.action, s.target_role, s.target_name, s.value, s.url_after);
+        insert.run(
+          flowId,
+          s.seq,
+          s.action,
+          s.target_role,
+          s.target_name,
+          s.value,
+          s.url_after,
+          s.target_nth,
+        );
       }
       return { slug: candidate, created: true };
     }
@@ -306,7 +370,10 @@ function storeFlow(
     const existingSteps = db
       .prepare("SELECT * FROM flow_steps WHERE flow_id = ? ORDER BY seq")
       .all(existing.id) as FlowStepRow[];
-    if (signatureOf(existingSteps) === signature) return { slug: candidate, created: false };
+    if (signatureOf(existingSteps) === signature) {
+      adoptPositions(db, existing.id, steps);
+      return { slug: candidate, created: false };
+    }
   }
   return { slug: base, created: false };
 }
@@ -341,4 +408,207 @@ export function readDrafts(reportDir: string): DraftFlow[] {
   } catch {
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Findings across sessions, and the observations the oracles read
+// ---------------------------------------------------------------------------
+
+export interface RecordFindingInput {
+  sessionId: number;
+  fid: string;
+  title: string;
+  severity: string;
+  oracle: string;
+  confidence: string;
+  pageKey: string | null;
+  now: string;
+}
+
+/**
+ * File one sighting of a defect and say whether the project has seen it before.
+ *
+ * Every sighting gets a row — the count is the history. What changes is how a
+ * report presents it: a nightly suite must lead with what broke since last
+ * night, not with the same three bugs every morning (§1.5).
+ */
+export function recordFinding(db: MemoryDb, input: RecordFindingInput): FindingVerdict {
+  const fingerprint = fingerprintOf(input.title, input.pageKey, input.oracle);
+  const prior = db
+    .prepare(
+      `SELECT f.id, f.first_seen_session, s.started_at
+       FROM findings f LEFT JOIN sessions s ON s.id = f.first_seen_session
+       WHERE f.fingerprint = ? ORDER BY f.id LIMIT 1`,
+    )
+    .get(fingerprint) as { id: number; first_seen_session: number | null; started_at: string | null } | undefined;
+
+  const firstSeenSession = prior?.first_seen_session ?? input.sessionId;
+  db.prepare(
+    `INSERT INTO findings (session_id, fid, title, severity, oracle, confidence, page_key,
+                           created_at, fingerprint, first_seen_session)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+  ).run(
+    input.sessionId,
+    input.fid,
+    input.title,
+    input.severity,
+    input.oracle,
+    input.confidence,
+    input.pageKey,
+    input.now,
+    fingerprint,
+    firstSeenSession,
+  );
+
+  const seenCount = (
+    db.prepare("SELECT COUNT(*) AS n FROM findings WHERE fingerprint = ?").get(fingerprint) as {
+      n: number;
+    }
+  ).n;
+
+  return {
+    fid: input.fid,
+    title: input.title,
+    oracle: input.oracle,
+    pageKey: input.pageKey,
+    fingerprint,
+    status: prior ? "KNOWN" : "NEW",
+    seenCount,
+    ...(prior?.started_at ? { firstSeenAt: prior.started_at } : { firstSeenAt: input.now }),
+  };
+}
+
+/**
+ * Persist this session's observations, plus one `page_visit` marker per page.
+ *
+ * The markers are what make "three CONSECUTIVE sessions that visited it"
+ * answerable: without them a page that was slow twice and then not visited for
+ * a month would look like an unbroken streak.
+ */
+function recordObservations(
+  db: MemoryDb,
+  sessionId: number,
+  observations: { type: string; detail: string; pageKey?: string }[],
+  visits: Visit[],
+  now: string,
+  clean: (t: string) => string,
+): void {
+  const insert = db.prepare(
+    "INSERT INTO observations (session_id, type, page_key, detail, created_at) VALUES (?,?,?,?,?)",
+  );
+  for (const key of new Set(visits.map((v) => v.key))) {
+    insert.run(sessionId, "page_visit", key, null, now);
+  }
+  for (const o of observations) {
+    insert.run(sessionId, o.type, o.pageKey ?? null, clean(o.detail ?? ""), now);
+  }
+}
+
+/**
+ * The performance oracle: a page that needed extra time on its last three
+ * visits, across three different sessions, is worth one low-confidence finding.
+ * One slow night is weather; three in a row is a pattern.
+ */
+function raisePerformanceFindings(
+  db: MemoryDb,
+  sessionId: number,
+  visits: Visit[],
+  now: string,
+): FindingVerdict[] {
+  const raised: FindingVerdict[] = [];
+  for (const key of new Set(visits.map((v) => v.key))) {
+    const recent = db
+      .prepare(
+        `SELECT session_id, MAX(CASE WHEN type = 'slow_page' THEN 1 ELSE 0 END) AS slow
+         FROM observations
+         WHERE page_key = ? AND type IN ('page_visit', 'slow_page')
+         GROUP BY session_id ORDER BY session_id DESC LIMIT ?`,
+      )
+      .all(key, SLOW_PAGE_THRESHOLD) as { session_id: number; slow: number }[];
+    if (recent.length < SLOW_PAGE_THRESHOLD) continue;
+    if (!recent.every((r) => r.slow === 1)) continue;
+
+    raised.push(
+      recordFinding(db, {
+        sessionId,
+        fid: `P-${key.slice(-12)}`,
+        title: `Slow page: ${key}`,
+        severity: "low",
+        oracle: "performance",
+        confidence: "low",
+        pageKey: key,
+        now,
+      }),
+    );
+  }
+  return raised;
+}
+
+// ---------------------------------------------------------------------------
+// Regression suites
+// ---------------------------------------------------------------------------
+
+export interface SuiteIngestInput {
+  reportDir: string;
+  startedAt: string;
+  endedAt: string;
+  status: string;
+  charter: string;
+  llmRequests: number;
+  findings: {
+    fid: string;
+    title: string;
+    severity: string;
+    oracle: string;
+    confidence: string;
+    pageKey: string | null;
+  }[];
+}
+
+/**
+ * A regression suite is a session too.
+ *
+ * It has to be: findings reference a session, and a nightly suite's findings
+ * are exactly the ones that must be counted across runs. Idempotent by report
+ * directory, like every other ingest.
+ */
+export function ingestSuite(
+  db: MemoryDb,
+  input: SuiteIngestInput,
+): { sessionId: number; verdicts: FindingVerdict[]; alreadyIngested: boolean } {
+  const existing = db
+    .prepare("SELECT id FROM sessions WHERE report_dir = ?")
+    .get(input.reportDir) as { id: number } | undefined;
+  if (existing) return { sessionId: existing.id, verdicts: [], alreadyIngested: true };
+
+  const now = isoNow();
+  return db.transaction(() => {
+    const sessionId = Number(
+      db
+        .prepare(
+          "INSERT INTO sessions (started_at, ended_at, status, charter, report_dir, llm_requests) VALUES (?,?,?,?,?,?)",
+        )
+        .run(
+          input.startedAt,
+          input.endedAt,
+          input.status,
+          input.charter,
+          input.reportDir,
+          input.llmRequests,
+        ).lastInsertRowid,
+    );
+    const verdicts = input.findings.map((f) =>
+      recordFinding(db, {
+        sessionId,
+        fid: f.fid,
+        title: f.title,
+        severity: f.severity,
+        oracle: f.oracle,
+        confidence: f.confidence,
+        pageKey: f.pageKey,
+        now,
+      }),
+    );
+    return { sessionId, verdicts, alreadyIngested: false };
+  })();
 }

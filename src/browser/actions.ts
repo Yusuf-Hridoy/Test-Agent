@@ -3,6 +3,7 @@ import type { ElementRef, MagpieConfig, Snapshot } from "../types.js";
 import type { SecretStore } from "../model/redact.js";
 import { sleep } from "../util.js";
 import { checkClick, checkGoto } from "./guard.js";
+import { indexOfTaggedElement } from "./locate.js";
 
 export const ACTION_TIMEOUT_MS = 10_000;
 export const NAV_TIMEOUT_MS = 30_000;
@@ -29,6 +30,26 @@ export interface ActionResult {
   timedOut?: boolean;
   /** A navigation/connection error worth showing to the environment monitor. */
   navError?: string;
+  /**
+   * 0-based position of the acted-on element among everything replay would
+   * match by role+name. Recorded so "the 3rd Add to cart button" survives into
+   * a flow; undefined when the element could not be placed.
+   */
+  targetNth?: number;
+}
+
+/**
+ * Where is this element in the list replay will enumerate? Computed BEFORE the
+ * action runs — afterwards the page may have re-rendered and the answer would
+ * describe a page that no longer exists.
+ */
+async function positionOf(ctx: ActionContext, el: ElementRef, id: string): Promise<number | undefined> {
+  try {
+    return await indexOfTaggedElement(ctx.page, el.role, el.name, id);
+  } catch {
+    // Locating is a nicety; never let it break the action itself.
+    return undefined;
+  }
 }
 
 function isTimeout(err: unknown): boolean {
@@ -150,6 +171,7 @@ export async function click(ctx: ActionContext, id: string): Promise<ActionResul
   if (!verdict.allowed) {
     return { ok: false, detail: verdict.reason!, newUrl: ctx.page.url(), refused: true };
   }
+  const nth = await positionOf(ctx, found.el, id);
   try {
     await found.locator.click({ timeout: ctx.timeoutMs ?? ACTION_TIMEOUT_MS });
     await settle(ctx.page);
@@ -167,6 +189,7 @@ export async function click(ctx: ActionContext, id: string): Promise<ActionResul
       ok: true,
       detail: `Clicked "${found.el.name}".${suffix}`,
       newUrl: ctx.page.url(),
+      ...(nth !== undefined ? { targetNth: nth } : {}),
     };
   } catch (err) {
     return {
@@ -187,9 +210,15 @@ export async function fill(ctx: ActionContext, id: string, text: string): Promis
   // Hard Rule 2: whatever goes into a password field becomes a redaction secret
   // BEFORE it is typed, so it can never reach a prompt or a log.
   if (found.el.tag.includes("password")) ctx.secrets.add(text);
+  const nth = await positionOf(ctx, found.el, id);
   try {
     await found.locator.fill(text, { timeout: ctx.timeoutMs ?? ACTION_TIMEOUT_MS });
-    return { ok: true, detail: `Filled "${found.el.name}"`, newUrl: ctx.page.url() };
+    return {
+      ok: true,
+      detail: `Filled "${found.el.name}"`,
+      newUrl: ctx.page.url(),
+      ...(nth !== undefined ? { targetNth: nth } : {}),
+    };
   } catch (err) {
     return {
       ok: false,
@@ -205,6 +234,7 @@ export async function select(ctx: ActionContext, id: string, value: string): Pro
   if ("error" in found) {
     return { ok: false, detail: found.error, newUrl: ctx.page.url(), refused: true };
   }
+  const nth = await positionOf(ctx, found.el, id);
   try {
     await found.locator.selectOption(value, { timeout: ctx.timeoutMs ?? ACTION_TIMEOUT_MS });
     await settle(ctx.page);
@@ -212,6 +242,7 @@ export async function select(ctx: ActionContext, id: string, value: string): Pro
       ok: true,
       detail: `Selected "${value}" in "${found.el.name}"`,
       newUrl: ctx.page.url(),
+      ...(nth !== undefined ? { targetNth: nth } : {}),
     };
   } catch (err) {
     return {

@@ -39,10 +39,17 @@ export function renderTerminalReport(args: {
   }
 
   if (result.findings.length) {
-    lines.push(`findings (${result.findings.length})`);
+    const graded = result.findings.filter((f) => f.memory);
+    const fresh = result.findings.filter((f) => f.memory?.status === "NEW").length;
+    lines.push(
+      graded.length
+        ? `findings (${result.findings.length}: ${fresh} new, ${graded.length - fresh} known)`
+        : `findings (${result.findings.length})`,
+    );
     for (const f of result.findings) {
+      const seen = f.memory ? (f.memory.status === "NEW" ? "NEW  " : `×${f.memory.seenCount}`.padEnd(5)) : "     ";
       lines.push(
-        `  ${pad(f.id, 6)} ${pad(f.severity, 7)} ${pad(f.oracle, 20)} ${pad(f.confidence, 5)} ${truncate(f.title, 44)}`,
+        `  ${pad(f.id, 6)} ${seen} ${pad(f.severity, 7)} ${pad(f.oracle, 20)} ${pad(f.confidence, 5)} ${truncate(f.title, 38)}`,
       );
     }
   } else {
@@ -79,4 +86,50 @@ export function renderTable(headers: string[], rows: string[][], indent = "  "):
       .join("  ")
       .trimEnd();
   return [line(headers), ...rows.map(line)].join("\n");
+}
+
+/** End-of-suite summary for `magpie run --regress`. */
+export function renderSuiteTerminal(
+  result: import("../memory/regress.js").SuiteResult,
+  htmlPath: string,
+): string {
+  const t = result.totals;
+  const headline =
+    result.environmentDown || t.untested
+      ? "ENVIRONMENT DOWN"
+      : t.failed || t.healed
+        ? "REGRESSIONS"
+        : t.refused
+          ? "REFUSED"
+          : "ALL PASS";
+  const lines: string[] = ["", `── ${headline} ${"─".repeat(Math.max(0, 60 - headline.length))}`];
+  lines.push(
+    renderTable(
+      ["OUTCOME", "FLOW", "STEPS", "TIME", "DETAIL"],
+      result.flows.map((f) => [
+        f.outcome + (f.failedAt !== undefined ? `@${f.failedAt}` : ""),
+        truncate(f.slug, 40),
+        `${f.stepsRun}/${f.stepsTotal}`,
+        `${(f.durationMs / 1000).toFixed(1)}s`,
+        truncate(f.reason ?? "", 46),
+      ]),
+    ),
+  );
+  lines.push("");
+  lines.push(
+    `totals    ${t.passed} passed · ${t.failed} failed · ${t.healed} healed · ` +
+      `${t.refused} refused · ${t.skipped} skipped · ${t.untested} untested`,
+  );
+  lines.push(`LLM requests: ${result.healCalls}`);
+  if (result.findings.length) {
+    const fresh = result.findings.filter((f) => f.status === "NEW").length;
+    lines.push(`findings  ${fresh} new · ${result.findings.length - fresh} known`);
+    for (const f of result.findings) {
+      lines.push(`  ${f.id} ${f.status.padEnd(5)} ${truncate(f.title, 60)}`);
+    }
+  }
+  lines.push("");
+  lines.push(`report    ${htmlPath}`);
+  lines.push(`suite     ${result.reportDir}/suite.json`);
+  return lines.join("\n");
 }

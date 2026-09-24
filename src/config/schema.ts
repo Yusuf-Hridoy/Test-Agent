@@ -16,6 +16,9 @@ export const DEFAULT_FORBIDDEN_ELEMENTS = [
 
 export const DEFAULT_BUDGET = { max_steps: 80, max_llm_requests: 60, max_minutes: 20 };
 
+/** Healing is opt-in and bounded (PHASE-3-BRIEF §1.6). */
+export const DEFAULT_REGRESS = { heal: false, max_heal_calls: 10 };
+
 export const providerSchema = z.enum(["gemini", "groq", "mistral"]);
 
 export const configSchema = z
@@ -65,6 +68,12 @@ export const configSchema = z
       .object({
         headed: z.boolean().default(false),
         slow_network_grace_ms: z.number().int().nonnegative().default(15000),
+      })
+      .default({}),
+    regress: z
+      .object({
+        heal: z.boolean().default(DEFAULT_REGRESS.heal),
+        max_heal_calls: z.number().int().nonnegative().default(DEFAULT_REGRESS.max_heal_calls),
       })
       .default({}),
   })

@@ -12,6 +12,13 @@ export interface InitOptions {
 }
 
 async function prompt(question: string, fallback?: string): Promise<string> {
+  // Same reasoning as `flows delete`: never hang a script waiting for a human.
+  if (!input.isTTY) {
+    throw new ConfigError(
+      `Refusing to prompt for "${question.trim()}": there is no terminal attached.\n` +
+        `Pass --name and --url so \`magpie init\` can run unattended.`,
+    );
+  }
   const rl = readline.createInterface({ input, output });
   try {
     const answer = (await rl.question(question)).trim();

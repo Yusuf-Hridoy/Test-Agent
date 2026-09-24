@@ -31,10 +31,23 @@ export function ingestIntoMemory(args: RecordArgs): void {
       snapshots: args.snapshots,
     });
     if (summary.alreadyIngested) return;
+
+    // Tell the report what memory knows: which of these defects are actually
+    // new tonight, and which have been sitting there for a week.
+    for (const verdict of summary.verdicts) {
+      const finding = args.result.findings.find((f) => f.id === verdict.fid);
+      if (!finding) continue;
+      finding.memory = {
+        status: verdict.status,
+        seenCount: verdict.seenCount,
+        ...(verdict.firstSeenAt ? { firstSeenAt: verdict.firstSeenAt } : {}),
+      };
+    }
     args.narrate?.(
       `memory: ${summary.pages} page(s), ${summary.transitions} transition(s), ` +
         `${summary.flowsCreated.length} new flow(s)` +
-        (summary.flowsSkipped.length ? `, ${summary.flowsSkipped.length} already known` : ""),
+        (summary.flowsSkipped.length ? `, ${summary.flowsSkipped.length} already known` : "") +
+        (summary.raised.length ? `, ${summary.raised.length} finding(s) raised from history` : ""),
     );
   } catch (err) {
     args.observe?.("memory_ingest_failed", `could not write project memory: ${(err as Error).message}`);

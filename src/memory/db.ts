@@ -15,14 +15,14 @@ import type {
 export type MemoryDb = Database.Database;
 
 export const DB_FILENAME = "magpie.db";
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /**
  * Migrations are numbered SQL strings applied in order at open. Never edit one
  * that has shipped — add the next number instead; existing project databases
  * only ever run the migrations they have not seen.
  */
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   // 001 — PHASE-2-BRIEF §1.2
   `
   CREATE TABLE sessions (
@@ -78,6 +78,23 @@ const MIGRATIONS: string[] = [
     page_key TEXT, created_at TEXT NOT NULL
   );
   CREATE INDEX idx_findings_page ON findings(page_key);
+  `,
+  // 002 — PHASE-3-BRIEF §1.1. The brief's trailing `UPDATE schema_version` is
+  // omitted on purpose: migrate() owns the version, and two writers of the same
+  // number is one too many.
+  `
+  ALTER TABLE flow_steps ADD COLUMN target_nth INTEGER;
+  ALTER TABLE findings  ADD COLUMN fingerprint TEXT;
+  ALTER TABLE findings  ADD COLUMN first_seen_session INTEGER;
+  CREATE TABLE observations (
+    id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES sessions(id),
+    type TEXT NOT NULL, page_key TEXT, detail TEXT, created_at TEXT NOT NULL);
+  CREATE INDEX idx_obs_page ON observations(page_key, type);
+  CREATE TABLE heal_events (
+    id INTEGER PRIMARY KEY, flow_id INTEGER NOT NULL REFERENCES flows(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, old_target TEXT NOT NULL, new_target TEXT NOT NULL,
+    model_note TEXT, session_ref TEXT, created_at TEXT NOT NULL);
+  CREATE INDEX idx_findings_fingerprint ON findings(fingerprint);
   `,
 ];
 
@@ -246,4 +263,35 @@ export function recordReplay(
   db.prepare(
     "UPDATE flows SET last_replay_at = ?, last_replay_result = ?, status = ?, updated_at = ? WHERE id = ?",
   ).run(now, result, status, now, flowId);
+}
+
+/**
+ * The session whose run covers this instant, if any.
+ *
+ * Lets a regression finding cite "last passed during suite #7" without storing
+ * a session id on every replay: a replay that happened inside a suite's window
+ * belongs to that suite, and a standalone `flows replay` belongs to none.
+ */
+export function sessionCoveringTime(db: MemoryDb, iso: string): SessionRow | undefined {
+  return db
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(iso, iso) as SessionRow | undefined;
+}
+
+/** The first sighting of a defect, by fingerprint — undefined if never seen. */
+export function firstFindingByFingerprint(
+  db: MemoryDb,
+  fingerprint: string,
+): (FindingRow & { session_started_at: string | null }) | undefined {
+  return db
+    .prepare(
+      `SELECT f.*, s.started_at AS session_started_at
+       FROM findings f LEFT JOIN sessions s ON s.id = f.session_id
+       WHERE f.fingerprint = ? ORDER BY f.id LIMIT 1`,
+    )
+    .get(fingerprint) as (FindingRow & { session_started_at: string | null }) | undefined;
 }
