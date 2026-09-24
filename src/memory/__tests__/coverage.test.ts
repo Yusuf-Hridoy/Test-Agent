@@ -9,11 +9,18 @@ import { loadConfig } from "../../config/load.js";
 import {
   closeDb,
   elementsSeenOn,
+  openEphemeralDb,
   openFrontier,
   openMemoryDb,
   pageCoverage,
   type MemoryDb,
 } from "../db.js";
+import {
+  asPercent,
+  COVERAGE_CAVEAT,
+  coverageReport,
+  coverageSchema,
+} from "../coverage.js";
 import { ingestSession } from "../ingest.js";
 
 /**
@@ -164,5 +171,114 @@ describe("frontier and element coverage (P4-T2)", () => {
       elements: db.prepare("SELECT COUNT(*) AS n FROM element_seen").get(),
       interactions: db.prepare("SELECT SUM(interactions) AS n FROM element_seen").get(),
     }).toEqual(before);
+  });
+});
+
+/**
+ * Hand-built memory with numbers a reader can check by eye, so the report is
+ * pinned to arithmetic rather than to whatever the code happens to produce.
+ */
+describe("coverage report (P4-T4)", () => {
+  function fixture(): MemoryDb {
+    const db = openEphemeralDb();
+    const now = "2026-09-24T10:00:00+02:00";
+    const page = db.prepare(
+      "INSERT INTO pages (page_key, sample_url, title, first_seen, last_seen) VALUES (?,?,?,?,?)",
+    );
+    page.run("shop.test/", "https://shop.test/", "Home", now, now);
+    page.run("shop.test/b", "https://shop.test/b", "Basket", now, now);
+    page.run("shop.test/c", "https://shop.test/c", "Contact", now, now);
+
+    const el = db.prepare(
+      "INSERT INTO element_seen (page_key, role, name, first_seen, last_seen, interactions) VALUES (?,?,?,?,?,?)",
+    );
+    // Home: 4 seen, 1 used → 25%
+    el.run("shop.test/", "button", "Search", now, now, 3);
+    el.run("shop.test/", "link", "Basket", now, now, 0);
+    el.run("shop.test/", "link", "Contact", now, now, 0);
+    el.run("shop.test/", "textbox", "Query", now, now, 0);
+    // Basket: 2 seen, 2 used → 100%
+    el.run("shop.test/b", "button", "Checkout", now, now, 1);
+    el.run("shop.test/b", "button", "Empty basket", now, now, 2);
+    // Contact: nothing interactive at all
+
+    const front = db.prepare(
+      "INSERT INTO frontier (page_key, sample_url, first_seen, seen_on_page, visited_at) VALUES (?,?,?,?,?)",
+    );
+    front.run("shop.test/d", "https://shop.test/d", "2026-09-24T09:00:00+02:00", "shop.test/", null);
+    front.run("shop.test/e", "https://shop.test/e", "2026-09-24T09:30:00+02:00", "shop.test/b", null);
+    front.run("shop.test/b", "https://shop.test/b", now, "shop.test/", now); // already visited
+
+    const flow = db.prepare(
+      "INSERT INTO flows (slug, name, status, start_page_key, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+    );
+    const verified = flow.run("checkout", "Check out", "verified", "shop.test/b", now, now);
+    flow.run("draft-one", "A draft", "draft", "shop.test/", now, now);
+    flow.run("broken-one", "A broken one", "broken", "shop.test/", now, now);
+    db.prepare(
+      "INSERT INTO flow_steps (flow_id, seq, action, target_name, url_after) VALUES (?,?,?,?,?)",
+    ).run(verified.lastInsertRowid, 1, "click", "Checkout", "shop.test/b");
+    return db;
+  }
+
+  it("counts pages as visited plus frontier", () => {
+    const db = fixture();
+    const report = coverageReport(db);
+    expect(report.pages).toEqual({ known: 5, visited: 3, frontier: 2 });
+    db.close();
+  });
+
+  it("totals elements across pages: 3 of 6 used", () => {
+    const db = fixture();
+    const report = coverageReport(db);
+    expect(report.elements).toEqual({ seen: 6, interacted: 3, ratio: 0.5 });
+    expect(asPercent(report.elements.ratio)).toBe("50%");
+    db.close();
+  });
+
+  it("ranks the least-exercised page first, and counts verified flows per page", () => {
+    const db = fixture();
+    const report = coverageReport(db);
+    expect(report.worstPages[0]).toEqual({
+      pageKey: "shop.test/",
+      title: "Home",
+      seen: 4,
+      interacted: 1,
+      ratio: 0.25,
+      verifiedFlows: 0,
+    });
+    const basket = report.worstPages.find((p) => p.pageKey === "shop.test/b")!;
+    expect(basket.ratio).toBe(1);
+    expect(basket.verifiedFlows).toBe(1);
+    // A page with nothing to click scores 1: it cannot be under-explored, and
+    // ranking it worst would send the explorer back to it forever.
+    expect(report.worstPages.find((p) => p.pageKey === "shop.test/c")!.ratio).toBe(1);
+    db.close();
+  });
+
+  it("lists only unvisited frontier pages, oldest first, with their referrer", () => {
+    const db = fixture();
+    const report = coverageReport(db);
+    expect(report.frontier.map((f) => f.pageKey)).toEqual(["shop.test/d", "shop.test/e"]);
+    expect(report.frontier[0]!.seenOnPage).toBe("shop.test/");
+    db.close();
+  });
+
+  it("counts flows by status and ships the caveat with the data", () => {
+    const db = fixture();
+    const report = coverageReport(db);
+    expect(report.flows).toEqual({ total: 3, verified: 1, draft: 1, broken: 1 });
+    expect(report.note).toBe(COVERAGE_CAVEAT);
+    expect(coverageSchema.safeParse(report).success).toBe(true);
+    db.close();
+  });
+
+  it("says 100% rather than NaN when nothing has been seen at all", () => {
+    const db = openEphemeralDb();
+    const report = coverageReport(db);
+    expect(report.elements).toEqual({ seen: 0, interacted: 0, ratio: 1 });
+    expect(report.pages).toEqual({ known: 0, visited: 0, frontier: 0 });
+    expect(coverageSchema.safeParse(report).success).toBe(true);
+    db.close();
   });
 });

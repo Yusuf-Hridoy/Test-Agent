@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Finding, MagpieConfig, Objective, SessionResult, StepRecord } from "../types.js";
 import { escapeHtml, truncate } from "../util.js";
 import { MAGPIE_VERSION } from "../version.js";
+import { COVERAGE_CAVEAT } from "../memory/coverage.js";
 
 const TEMPLATE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -46,7 +47,7 @@ export function renderReport(input: ReportInput): string {
     .replace("{{HEADER}}", header(input))
     .replace("{{PLAN}}", plan(result.objectives))
     .replace("{{FINDINGS}}", findings(result, input.steps))
-    .replace("{{OBSERVATIONS}}", observations(result))
+    .replace("{{OBSERVATIONS}}", `${coverage(result)}\n${observations(result)}`)
     .replace("{{SCREENSHOTS}}", screenshots(result))
     .replace("{{TIMELINE}}", timeline(input.steps))
     .replace("{{FOOTER}}", footer(result));
@@ -263,4 +264,31 @@ function memoryChip(f: Finding): string {
   if (f.memory.status === "NEW") return `<span class="chip">NEW</span>`;
   const since = f.memory.firstSeenAt ? ` since ${escapeHtml(f.memory.firstSeenAt.slice(0, 10))}` : "";
   return `<span class="chip">KNOWN — seen ${f.memory.seenCount}×${since}</span>`;
+}
+
+/**
+ * What this session added to the map (Phase 4 §1.4).
+ *
+ * Rendered for every ingested session, not only exploratory ones: a charter run
+ * discovers pages and leaves elements untouched in exactly the same way, and
+ * two different report shapes would be a maintenance trap for no gain.
+ */
+function coverage(result: SessionResult): string {
+  const c = result.coverage;
+  if (!c) return "";
+  const pagesAdded = c.pagesAfter - c.pagesBefore;
+  const pct = c.elementsSeen === 0 ? 1 : c.elementsInteracted / c.elementsSeen;
+  const frontierArrow =
+    c.frontierBefore === c.frontierAfter
+      ? `${c.frontierAfter}`
+      : `${c.frontierBefore} → ${c.frontierAfter}`;
+  return `<h2>Coverage</h2>
+<div class="card"><table>
+<tr><th>Metric</th><th>This session</th></tr>
+<tr><td>Pages known</td><td>${c.pagesAfter}${pagesAdded > 0 ? ` <span class="ok">(+${pagesAdded})</span>` : ""}</td></tr>
+<tr><td>Pages still on the frontier</td><td>${escapeHtml(frontierArrow)}</td></tr>
+<tr><td>Elements interacted with</td><td>${c.elementsInteracted} of ${c.elementsSeen} seen (${Math.round(pct * 100)}%)</td></tr>
+<tr><td>Flows drafted here</td><td>${c.flowsDrafted}</td></tr>
+</table>
+<p class="muted" style="margin:10px 0 0">${escapeHtml(COVERAGE_CAVEAT)}</p></div>`;
 }

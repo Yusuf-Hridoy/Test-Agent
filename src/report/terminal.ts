@@ -65,6 +65,17 @@ export function renderTerminalReport(args: {
     }
   }
 
+  if (result.coverage) {
+    const c = result.coverage;
+    const added = c.pagesAfter - c.pagesBefore;
+    lines.push("");
+    lines.push(
+      `coverage  ${c.pagesAfter} page(s) known${added > 0 ? ` (+${added})` : ""} · ` +
+        `${c.frontierAfter} on the frontier · ` +
+        `${c.elementsInteracted}/${c.elementsSeen} elements used`,
+    );
+  }
+
   lines.push("");
   lines.push(`report    ${args.htmlPath}`);
   return lines.join("\n");

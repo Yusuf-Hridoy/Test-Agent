@@ -159,6 +159,19 @@ export interface SessionResult {
   usage: Record<Provider, ProviderUsage>;
   stepCount: number;
   reportDir: string;
+  /**
+   * What this session changed about coverage (Phase 4). Absent when the session
+   * was never ingested — a report never shows numbers it does not have.
+   */
+  coverage?: {
+    pagesBefore: number;
+    pagesAfter: number;
+    frontierBefore: number;
+    frontierAfter: number;
+    elementsSeen: number;
+    elementsInteracted: number;
+    flowsDrafted: number;
+  };
 }
 
 export const PROVIDERS: Provider[] = ["gemini", "groq", "mistral"];

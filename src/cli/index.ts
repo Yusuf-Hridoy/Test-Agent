@@ -68,6 +68,16 @@ memory
     memoryStatsCommand(opts);
   });
 
+memory
+  .command("coverage")
+  .description("How much of the app has been exercised, and where to look next")
+  .option("--json", "print the coverage report as JSON")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (opts: { json?: boolean; dir?: string }) => {
+    const { memoryCoverageCommand } = await import("./memory.js");
+    memoryCoverageCommand(opts);
+  });
+
 const flows = program.command("flows").description("Work with remembered flows");
 
 flows

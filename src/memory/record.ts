@@ -34,6 +34,7 @@ export function ingestIntoMemory(args: RecordArgs): void {
       ...(args.cfg ? { cfg: args.cfg } : {}),
     });
     if (summary.alreadyIngested) return;
+    args.result.coverage = summary.coverage;
 
     // Tell the report what memory knows: which of these defects are actually
     // new tonight, and which have been sitting there for a week.

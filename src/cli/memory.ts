@@ -11,6 +11,7 @@ import {
   topPages,
 } from "../memory/db.js";
 import { renderTable } from "../report/terminal.js";
+import { asPercent, coverageReport } from "../memory/coverage.js";
 import { truncate } from "../util.js";
 
 export interface MemoryOptions {
@@ -129,4 +130,75 @@ function filesSize(memoryDir: string): number {
       }
     })
     .reduce((a, b) => a + b, 0);
+}
+
+export interface CoverageOptions extends MemoryOptions {
+  json?: boolean;
+}
+
+/**
+ * `magpie memory coverage` — how much of the app Magpie has actually exercised,
+ * and where to look next.
+ */
+export function memoryCoverageCommand(opts: CoverageOptions = {}): void {
+  const dir = opts.dir ?? process.cwd();
+  const db = openMemoryDb(dir);
+  try {
+    const report = coverageReport(db);
+
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      return;
+    }
+
+    console.log(`coverage: ${memoryDbPath(dir)}\n`);
+    for (const [label, value] of [
+      ["pages known", `${report.pages.known}`],
+      ["  visited", `${report.pages.visited}`],
+      ["  frontier", `${report.pages.frontier} (linked, never opened)`],
+      [
+        "elements used",
+        `${report.elements.interacted} of ${report.elements.seen} seen (${asPercent(report.elements.ratio)})`,
+      ],
+      [
+        "flows",
+        `${report.flows.total} (${report.flows.verified} verified, ${report.flows.draft} draft, ${report.flows.broken} broken)`,
+      ],
+    ] as [string, string][]) {
+      console.log(`${label.padEnd(16)}${value}`);
+    }
+
+    if (report.worstPages.length) {
+      console.log("\nleast-exercised pages");
+      console.log(
+        renderTable(
+          ["USED", "PAGE", "ELEMENTS", "FLOWS"],
+          report.worstPages.map((p) => [
+            asPercent(p.ratio),
+            truncate(p.pageKey, 48),
+            `${p.interacted}/${p.seen}`,
+            String(p.verifiedFlows),
+          ]),
+        ),
+      );
+    }
+
+    if (report.frontier.length) {
+      console.log("\nfrontier — linked but never opened");
+      console.log(
+        renderTable(
+          ["PAGE", "FIRST SEEN ON"],
+          report.frontier.map((f) => [
+            truncate(f.pageKey, 48),
+            truncate(f.seenOnPage ?? "(unknown)", 40),
+          ]),
+        ),
+      );
+      console.log("\nRun `magpie run --explore` to work through it.");
+    }
+
+    console.log(`\n${report.note}`);
+  } finally {
+    closeDb(db);
+  }
 }

@@ -46,7 +46,30 @@ export interface IngestResult {
   verdicts: FindingVerdict[];
   /** Findings this ingest raised on its own, e.g. the performance oracle. */
   raised: FindingVerdict[];
+  /** What this session changed about coverage (Phase 4 §1.4). */
+  coverage: SessionCoverage;
 }
+
+/** Before-and-after, so a report can say what a session actually added. */
+export interface SessionCoverage {
+  pagesBefore: number;
+  pagesAfter: number;
+  frontierBefore: number;
+  frontierAfter: number;
+  elementsSeen: number;
+  elementsInteracted: number;
+  flowsDrafted: number;
+}
+
+const EMPTY_COVERAGE: SessionCoverage = {
+  pagesBefore: 0,
+  pagesAfter: 0,
+  frontierBefore: 0,
+  frontierAfter: 0,
+  elementsSeen: 0,
+  elementsInteracted: 0,
+  flowsDrafted: 0,
+};
 
 export interface FindingVerdict {
   fid: string;
@@ -93,12 +116,19 @@ export function ingestSession(
       flowsSkipped: [],
       verdicts: [],
       raised: [],
+      coverage: EMPTY_COVERAGE,
     };
   }
 
   const steps = readSteps(reportDir);
   const drafts = readDrafts(reportDir);
   const llmRequests = PROVIDERS.reduce((n, p) => n + (result.usage?.[p]?.requests ?? 0), 0);
+
+  const countOf = (sql: string): number => (db.prepare(sql).get() as { n: number }).n;
+  const before = {
+    pages: countOf("SELECT COUNT(*) AS n FROM pages"),
+    frontier: countOf("SELECT COUNT(*) AS n FROM frontier WHERE visited_at IS NULL"),
+  };
 
   return db.transaction((): IngestResult => {
     const sessionId = Number(
@@ -196,6 +226,15 @@ export function ingestSession(
       flowsSkipped,
       verdicts,
       raised,
+      coverage: {
+        pagesBefore: before.pages,
+        pagesAfter: countOf("SELECT COUNT(*) AS n FROM pages"),
+        frontierBefore: before.frontier,
+        frontierAfter: countOf("SELECT COUNT(*) AS n FROM frontier WHERE visited_at IS NULL"),
+        elementsSeen: countOf("SELECT COUNT(*) AS n FROM element_seen"),
+        elementsInteracted: countOf("SELECT COUNT(*) AS n FROM element_seen WHERE interactions > 0"),
+        flowsDrafted: flowsCreated.length,
+      },
     };
   })();
 }
