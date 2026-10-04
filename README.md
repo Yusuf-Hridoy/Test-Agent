@@ -23,14 +23,26 @@ It runs on **free-tier LLM APIs** (Gemini, Groq, Mistral). No paid key required.
 ## Install
 
 ```bash
-git clone <this repo> && cd magpie
+npm install -g magpie-qa
+npx playwright install chromium   # required, once — see the note below
+```
+
+Node ≥ 20 required.
+
+> **The browser is a separate step on purpose.** Magpie does **not** run a
+> postinstall script, because installing a package should not quietly download
+> 300 MB of Chromium. Run `npx playwright install chromium` yourself, once per
+> machine (or once per CI image). Everything else is in the package.
+
+From a clone instead:
+
+```bash
+git clone https://github.com/Yusuf-Hridoy/Test-Agent.git && cd Test-Agent
 npm install
 npx playwright install chromium
 npm run build
 npm link            # optional: puts `magpie` on your PATH
 ```
-
-Node ≥ 20 required.
 
 ## Quickstart (2 minutes, against the public Sauce Labs demo shop)
 
