@@ -6,13 +6,25 @@ import { escapeHtml, truncate } from "../util.js";
 import { MAGPIE_VERSION } from "../version.js";
 import { COVERAGE_CAVEAT } from "../memory/coverage.js";
 
-const TEMPLATE = path.join(
+/** Where the HTML shells and the shared stylesheet live, from dist/ or src/. */
+export const TEMPLATES_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
   "templates",
-  "report.html",
 );
+
+const TEMPLATE = path.join(TEMPLATES_DIR, "report.html");
+
+/**
+ * The one stylesheet, inlined. Reports and the dashboard are both single
+ * offline files, so a <link> is not an option — but two copies of the design
+ * would drift, so the CSS lives in templates/magpie.css and is read at render.
+ */
+export function styleBlock(extra = ""): string {
+  const css = fs.readFileSync(path.join(TEMPLATES_DIR, "magpie.css"), "utf8");
+  return `<style>\n${css}${extra}</style>`;
+}
 
 const STATUS_ICON: Record<Objective["status"], string> = {
   planned: "·",
@@ -43,6 +55,7 @@ export function renderReport(input: ReportInput): string {
   const { result, cfg } = input;
   const title = `Magpie — ${cfg.name} — ${result.status}`;
   return template
+    .replace("{{STYLE}}", () => styleBlock())
     .replace("{{TITLE}}", escapeHtml(title))
     .replace("{{HEADER}}", header(input))
     .replace("{{PLAN}}", plan(result.objectives))

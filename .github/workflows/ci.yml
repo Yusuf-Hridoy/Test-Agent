@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Two jobs would duplicate the browser download for no gain; the suite is one
+# unit and either all of it passes or the commit is not ready.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      # Magpie never installs browsers on `npm install` — it is an explicit
+      # step here for the same reason it is an explicit step for users.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The whole point of the suite is that it needs no model: every test
+      # drives a local fixture app with a scripted model. If a key were ever
+      # present, a test could start depending on one without anybody noticing,
+      # and the suite would stop being runnable by a contributor without keys.
+      - name: Assert no model provider key is reachable
+        run: |
+          leaked=$(env | grep -E '^(GOOGLE|GEMINI|GROQ|MISTRAL)_' || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::A model provider key is set in CI. The suite must run without one."
+            echo "$leaked" | sed -E 's/=.*/=<redacted>/'
+            exit 1
+          fi
+          echo "No model provider key in the environment — the suite runs offline."
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Full test suite
+        run: npx vitest run

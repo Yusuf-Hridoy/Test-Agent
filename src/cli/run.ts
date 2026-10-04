@@ -2,17 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { ConfigError, loadConfig } from "../config/load.js";
 import { API_KEY_ENV, apiKeyFor } from "../model/providers.js";
-import { PROVIDERS, type SessionResult, type StepRecord } from "../types.js";
+import { EXPLORE_CHARTER, PROVIDERS, type SessionResult, type StepRecord } from "../types.js";
 import { runSession } from "../harness/session.js";
 import { writeHtmlReport } from "../report/html.js";
 import { renderTerminalReport } from "../report/terminal.js";
-
-/**
- * What an exploratory session's "charter" says. It appears in the report header
- * and in memory, so it has to read as an honest description of what happened.
- */
-export const EXPLORE_CHARTER =
-  "Exploratory session — objectives were generated from the application itself.";
 
 export interface RunOptions {
   charter?: string;

@@ -376,3 +376,51 @@ export function pageCoverage(db: MemoryDb): PageCoverage[] {
     flows: flowCounts.get(r.page_key) ?? 0,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Whole-project views (Phase 5). The dashboard shows everything a project
+// remembers at once, which is the one reader that wants unbounded lists.
+// ---------------------------------------------------------------------------
+
+/** Every session, newest first. */
+export function allSessions(db: MemoryDb): SessionRow[] {
+  return db.prepare("SELECT * FROM sessions ORDER BY id DESC").all() as SessionRow[];
+}
+
+export interface FlowOverview extends FlowRow {
+  steps: number;
+  /** How often a model has had to relocate a step of this flow. */
+  heals: number;
+}
+
+/** Flows with the two numbers that say whether they are still trustworthy. */
+export function flowOverview(db: MemoryDb): FlowOverview[] {
+  return db
+    .prepare(
+      `SELECT f.*,
+              (SELECT COUNT(*) FROM flow_steps s WHERE s.flow_id = f.id)  AS steps,
+              (SELECT COUNT(*) FROM heal_events h WHERE h.flow_id = f.id) AS heals
+       FROM flows f ORDER BY f.status, f.slug`,
+    )
+    .all() as FlowOverview[];
+}
+
+export interface FindingWithSession extends FindingRow {
+  report_dir: string | null;
+  session_started_at: string | null;
+}
+
+/**
+ * Every recorded sighting of every defect, newest first, with the run it came
+ * from. Grouping into defects happens in the caller: the dashboard wants one
+ * card per defect, and SQLite cannot pick "the newest row per group" cheaply.
+ */
+export function allFindings(db: MemoryDb): FindingWithSession[] {
+  return db
+    .prepare(
+      `SELECT f.*, s.report_dir AS report_dir, s.started_at AS session_started_at
+       FROM findings f LEFT JOIN sessions s ON s.id = f.session_id
+       ORDER BY f.id DESC`,
+    )
+    .all() as FindingWithSession[];
+}

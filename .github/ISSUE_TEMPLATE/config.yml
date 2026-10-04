@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question about usage
+    url: https://github.com/Yusuf-Hridoy/Test-Agent/blob/main/docs/faq.md
+    about: The FAQ covers positioning, free-tier economics, what Magpie finds and what it misses.

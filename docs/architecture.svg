@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 440" width="920" height="440" role="img" aria-label="Magpie architecture: exploratory and charter runs spend model calls and write to a per-project SQLite memory; regression runs read that memory and replay flows with zero model calls.">
+  <style>
+    .t { font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #16181d; }
+    .h { font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #16181d; }
+    .m { font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #5d6470; }
+    .mono { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #2b5fa8; }
+    .cost { font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .box { fill: #ffffff; stroke: #d8dce2; stroke-width: 1.5; }
+    .layer { fill: #f7f7f8; stroke: #e2e5ea; stroke-width: 1; }
+    .arrow { stroke: #9aa3b0; stroke-width: 1.6; fill: none; }
+  </style>
+
+  <rect width="920" height="440" fill="#ffffff"/>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa3b0"/>
+    </marker>
+  </defs>
+
+  <!-- Row 1: the two modes that spend tokens -->
+  <rect class="box" x="40" y="24" width="380" height="96" rx="10"/>
+  <text class="mono" x="60" y="52">magpie run --explore</text>
+  <text class="m" x="60" y="74">Magpie picks what to test, page by page.</text>
+  <text class="m" x="60" y="92">Code picks where to go; the model picks what to test there.</text>
+  <text class="cost" x="60" y="110" fill="#a15c00">one model call per page</text>
+
+  <rect class="box" x="460" y="24" width="420" height="96" rx="10"/>
+  <text class="mono" x="480" y="52">magpie run --charter "…"</text>
+  <text class="m" x="480" y="74">You name the target; Magpie plans objectives and drives them.</text>
+  <text class="m" x="480" y="92">Every passed objective is compiled into a replayable flow.</text>
+  <text class="cost" x="480" y="110" fill="#a15c00">a few dozen model calls</text>
+
+  <path class="arrow" d="M 230 122 L 230 168" marker-end="url(#a)"/>
+  <path class="arrow" d="M 670 122 L 670 168" marker-end="url(#a)"/>
+  <text class="m" x="244" y="152">writes</text>
+  <text class="m" x="684" y="152">writes</text>
+
+  <!-- Row 2: memory -->
+  <rect class="box" x="40" y="172" width="840" height="104" rx="10" fill="#f7f7f8"/>
+  <text class="h" x="60" y="200">memory/magpie.db <tspan class="m">— one SQLite file per project, no server, no cloud</tspan></text>
+  <text class="t" x="60" y="228">pages &amp; transitions — the app map, with entity ids collapsed to <tspan class="mono">:id</tspan></text>
+  <text class="t" x="60" y="248">flows &amp; flow_steps — passed objectives, targeted by role + accessible name</text>
+  <text class="t" x="60" y="268">findings — fingerprinted across runs, so tonight's news leads · coverage — what has actually been exercised</text>
+
+  <path class="arrow" d="M 300 278 L 300 324" marker-end="url(#a)"/>
+  <text class="m" x="314" y="308">reads</text>
+
+  <!-- Row 3: the mode that costs nothing -->
+  <rect class="box" x="40" y="328" width="500" height="96" rx="10"/>
+  <text class="mono" x="60" y="356">magpie run --regress all</text>
+  <text class="m" x="60" y="378">Replays every remembered flow against the live app, deterministically.</text>
+  <text class="m" x="60" y="396">A flow that used to pass and no longer does is a high-confidence finding.</text>
+  <text class="cost" x="60" y="414" fill="#1c7c4a">zero model calls — asserted, not assumed</text>
+
+  <rect class="box" x="580" y="328" width="300" height="96" rx="10" stroke-dasharray="5 4"/>
+  <text class="mono" x="600" y="356">… --heal</text>
+  <text class="m" x="600" y="378">Opt-in. One model call per failed step,</text>
+  <text class="m" x="600" y="396">to relocate a renamed target.</text>
+  <text class="cost" x="600" y="414" fill="#a15c00">healed ≠ passed: demoted to draft</text>
+
+  <path class="arrow" d="M 540 376 L 576 376" marker-end="url(#a)"/>
+  <path class="arrow" d="M 730 328 L 730 300 L 620 300 L 620 278" marker-end="url(#a)" stroke-dasharray="5 4"/>
+  <text class="m" x="636" y="294">patches the flow</text>
+</svg>

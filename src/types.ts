@@ -175,3 +175,12 @@ export interface SessionResult {
 }
 
 export const PROVIDERS: Provider[] = ["gemini", "groq", "mistral"];
+
+/**
+ * What an exploratory session's "charter" says. It appears in the report
+ * header, in memory, and on the dashboard, so it has to read as an honest
+ * description of what happened — and it lives here rather than in the CLI
+ * because the dashboard reads it back out of the database to label a run.
+ */
+export const EXPLORE_CHARTER =
+  "Exploratory session — objectives were generated from the application itself.";

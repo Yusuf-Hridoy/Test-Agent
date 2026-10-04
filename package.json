@@ -1,9 +1,27 @@
 {
-  "name": "magpie",
-  "version": "0.1.0",
-  "description": "The testing agent that remembers your app — an open-source, self-hosted web-testing agent with persistent memory.",
+  "name": "magpie-qa",
+  "version": "1.0.0",
+  "description": "The testing agent that remembers your app — a self-hosted, open-source web-testing agent with persistent memory: explore once, replay for free, heal when the app changes.",
   "license": "MIT",
+  "author": "Yusuf-Hridoy",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yusuf-Hridoy/Test-Agent.git"
+  },
+  "homepage": "https://github.com/Yusuf-Hridoy/Test-Agent#readme",
+  "bugs": {
+    "url": "https://github.com/Yusuf-Hridoy/Test-Agent/issues"
+  },
+  "keywords": [
+    "qa",
+    "testing",
+    "agent",
+    "playwright",
+    "llm",
+    "regression",
+    "exploratory"
+  ],
   "bin": {
     "magpie": "dist/cli/index.js"
   },
@@ -12,14 +30,17 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "templates",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.0",
