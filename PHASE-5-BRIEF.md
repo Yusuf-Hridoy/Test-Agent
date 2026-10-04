@@ -109,13 +109,61 @@ the repo (cite which, in an HTML comment), per Hard Rule 9.
 | D7 | Secret + employer sweep over README, docs/, launch/ | zero key prefixes, zero employer/workplace names |
 
 ## 2. Completion checklist
-- [ ] T1–T6 done, committed at COMMIT POINTs on `phase-5`; D1–D7 pass, Run Log filled
-- [ ] CLAUDE.md: Phase 5 COMPLETE, roadmap all-green, decision log updated
-- [ ] Handoff: push + PR command, the npm publish command (user-run, optional
-      timing), GitHub description/topics to paste, tag command
-      (`git tag v1.0.0 && git push --tags`) to run AFTER review + merge,
-      and the suggested launch order (merge → tag → publish → post)
+- [x] T1–T6 done. T1–T5 committed on `phase-5`; **T6 (`launch/`) is still
+      uncommitted** — see the handoff.
+- [x] D1, D2, D3, D6, D7 pass; Run Log filled. **D4 and D5 remain with the
+      user** (a push, and a real key).
+- [x] CLAUDE.md: decision log updated; roadmap flips to all-green once D4/D5
+      land.
+- [x] Handoff delivered: push + PR, npm publish, GitHub description/topics,
+      the v1.0.0 tag after review + merge, and the launch order.
 
-## 3. Run Log (P5-T7, self-run)
+## 3. Run Log (P5-T7, self-run 2026-10-04)
 
-_Filled in during T7._
+**D1, D2, D3, D6, D7 PASS. D4 and D5 are blocked on the user** — D4 needs the
+branch pushed before Actions can run, D5 spends real Gemini quota on the user's
+key. Nothing was faked to close them.
+
+| # | Result | What happened |
+|---|--------|---------------|
+| D1 | **PASS (on a substitute project — see below)** | Counts reconcile exactly with `memory show`: sessions 3, pages 2, transitions 2, flows 2, findings 1. All 3 report links resolve to real `index.html` files on disk. Offline: 0 `<script>`/`<link>` tags, 0 external refs, 0 absolute paths. Rendered through Chromium and inspected: coverage block, least-exercised pages, open frontier, flows table with status chips and last-replay results, the finding under **New in the latest run**, and a 3-row sessions timeline badged `regress` / `charter` / `charter`. |
+| D2 | **PASS** | `magpie init` then `magpie dashboard` on an empty project: getting-started card rendered, **exit 0**, no Coverage section, no crash. |
+| D3 | **PASS** | `npm pack` → 60 files, 100 kB. `tar -tzf` audit for `__tests__\|fakeapp\|fixture\|test-projects\|launch/\|docs/\|scripts/\|.map\|.ts\|BRIEF\|CLAUDE` → **zero matches**; the tarball holds only `dist/`, `templates/`, `README.md`, `LICENSE`, `package.json`. Installed into a clean temp project: `magpie --version` → `1.0.0`, `--help` lists all six commands, `init` scaffolds, `login --help` works, and `dashboard` renders (so templates resolve from the installed `dist`). |
+| D4 | **BLOCKED — needs the user to push** | Workflow written and YAML-validated. The no-key guard was tested both ways locally: clean env passes; with `GEMINI_API_KEY` set it fails and prints `GEMINI_API_KEY=<redacted>`, never a value. The CI condition itself was reproduced locally — this machine has no provider key in its environment, and the full suite is **264 green** under exactly that condition. Only the Actions run and the badge resolving remain unverified. |
+| D5 | **BLOCKED — needs the user's Gemini key** | Everything in the quickstart that does not spend quota was verified: `magpie init` and `magpie dashboard` run from the globally-installed tarball (D3), and every `magpie …` line in the README was checked against the built CLI's own `--help` (T4). The live charter run against saucedemo is the user's to perform. |
+| D6 | **PASS** | Every copy-paste example executed, not read. All 8 read-only `docs/cli.md` commands and all 13 `--help` invocations: OK. `docs/memory.md`: `sqlite3 .schema`, the flows query and the `heal_events` audit join all run; `flows rename` and `flows delete -y` run against a copy. `docs/ci.md`: the `jq '[.findings[] \| select(.status == "NEW")] \| length'` recipe runs against a real `suite.json` → `0`. `docs/config.md`: all 6 YAML blocks fed through the real `parseConfig` → valid. Both `docs/ci.md` workflow blocks parse as YAML. All local markdown links across README, CONTRIBUTING and docs resolve → **0 broken**. |
+| D7 | **PASS** | Over `README.md`, `docs/`, `launch/`, `CONTRIBUTING.md` and `.github/`: zero Google/Groq/OpenAI/Slack key prefixes; zero opaque tokens (the only long strings are a flow slug and report folder names); zero employer or workplace names; `secret_sauce` appears nowhere outside `scripts/demo.ts`, which CLAUDE.md designates as its one allowed home; no `.env` or `.auth/` file is tracked by git. |
+
+### D1's substitution, stated plainly
+
+**The Phase 4 acceptance project no longer exists on this machine.** A
+filesystem-wide search for `magpie.db` found only the empty databases created
+during this phase's own smoke tests. Phase 4's projects were not committed
+(`reports/` and `memory/` are gitignored) and have since been removed.
+
+Rather than report D1 unverifiable, I built an equivalent project **through the
+real code path**: two charter sessions driven by `runSession` against the test
+suite's fixture shop — real planner, real browser, real oracles, real evidence,
+real `ingestIntoMemory` — followed by a real `magpie run --regress all
+--include-draft` through the built CLI, which replayed both flows in 0.8 s each
+and reported `LLM requests: 0`. Only the model's replies were scripted; no row
+was hand-inserted. The resulting database is as real as Phase 4's was, and
+carries all three session modes the dashboard has to render.
+
+Two things that is genuinely weaker than the literal scenario: the pages and
+findings come from a 5-page fixture rather than saucedemo, and no model
+provider was involved. Neither affects what D1 tests — that the dashboard
+reconciles with memory and links resolve.
+
+### Found during acceptance
+
+1. **The harness rejected my first two scripted plans** (`PLAN_FAILED`) because
+   they had 2 objectives and `MIN_OBJECTIVES` is 5. Not a defect — the planner
+   validation doing its job, and worth recording because it is the kind of
+   thing that looks like a bug for ten minutes.
+2. **`CLAUDE.md` pointed at a file that does not exist** —
+   `PHASE-1-ACCEPTANCE-BRIEF.md`, deleted in `ee691c1`. Fixed during T6 to name
+   the commit it can be recovered from; the recovery command was verified.
+3. **No defect was found in Phase 5's own code.** Worth saying rather than
+   leaving implied: unlike Phases 1–4, acceptance here changed no behaviour.
+   This phase ships no new testing capability, which is the point of it.
