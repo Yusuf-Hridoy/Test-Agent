@@ -21,6 +21,10 @@ Exit code `0` means every flow ran and passed. Anything else is worth a look.
 | `memory/magpie.db` | the flows to replay | commit it (see below), or restore it from a cache/artifact |
 | `.auth/<name>.json` | a logged-in session | a CI secret, or re-created each run with `auth.strategy: form-login` |
 | An API key | **only** with `--heal` | omit `--heal` and you need no key at all |
+| The CLI | to run anything | `npm install -g magpie-qa@^1`, plus `npx playwright install --with-deps chromium` |
+
+Magpie does not install browsers on `npm install` — Chromium is a separate,
+explicit step, so bake it into your image or run it as shown below.
 
 ### Committing memory
 
@@ -67,7 +71,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm ci
+      - run: npm install -g magpie-qa@^1
       - run: npx playwright install --with-deps chromium
 
       # Credentials for auth.strategy: form-login
@@ -79,7 +83,13 @@ jobs:
 
       - name: Replay every verified flow
         working-directory: tests/magpie
-        run: npx magpie run --regress all --fail-on-skipped --json > suite.json
+        run: magpie run --regress all --fail-on-skipped --json > suite.json
+
+      # Read-only, no model calls: safe even when the step above failed.
+      - name: Render the dashboard
+        if: always()
+        working-directory: tests/magpie
+        run: magpie dashboard
 
       # Always upload: the evidence matters most when the step failed.
       - name: Upload evidence
@@ -89,6 +99,7 @@ jobs:
           name: magpie-regression
           path: |
             tests/magpie/suite.json
+            tests/magpie/dashboard.html
             tests/magpie/reports/
           retention-days: 14
 ```
@@ -138,7 +149,7 @@ contract; in CI you almost certainly want it on.
 
 ```cron
 # Nightly at 03:00. Magpie does not schedule anything itself.
-0 3 * * * cd /srv/magpie-tests && /usr/bin/npx magpie run --regress all --json \
+0 3 * * * cd /srv/magpie-tests && /usr/local/bin/magpie run --regress all --fail-on-skipped --json \
   >> /var/log/magpie/$(date +\%F).json 2>> /var/log/magpie/$(date +\%F).log
 ```
 
@@ -172,7 +183,7 @@ job that looks like it is still working.
 
 ```jsonc
 {
-  "magpieVersion": "0.1.0",
+  "magpieVersion": "1.0.0",
   "project": "shop",                       // config `name`
   "baseUrl": "https://shop.example.com",
   "startedAt": "2026-09-23T03:00:01.123+00:00",   // ISO-8601 with offset

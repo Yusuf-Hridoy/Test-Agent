@@ -257,11 +257,14 @@ early, even partially, unless the brief says to leave a seam for them.
 - 2026-10-04 (P5-T3): the quickstart's expected output is transcribed from `renderTerminalReport` and the harness `narrate` calls, not written by hand. A README snippet that does not match what the tool prints is a small lie, and Hard Rule 9 applies to documentation too.
 - 2026-10-04 (P5-T3): README cut 514 → 278 lines. What left it did not die — the config table, the command table, the memory internals, the regression and explore walkthroughs move to `docs/` in T4, which is why README links to those files before they exist.
 
+- 2026-10-04 (P5-T4): docs/ examples are verified mechanically, not by eye — every `yaml` block in `docs/config.md` is fed through the real `parseConfig`, every `magpie …` line in README + docs is checked against the built CLI's own `--help`, and local links are resolved. Three documentation errors surfaced that way (an invented `assert` flow action, the wrong `flows show` layout, and `magpieVersion: 0.1.0`), which is three more than a read-through would have caught.
+- 2026-10-04 (P5-T4): `docs/ci.md` installs `magpie-qa` globally rather than assuming the project repo has Magpie as a dependency. The Actions recipe also renders the dashboard with `if: always()` and uploads it — it is read-only and spends no model calls, so it is the one artefact worth having precisely when the suite failed.
+
 ## 11. Current status
 
 - Phase: 5 — **in progress**, started 2026-10-04. Brief + Run Log: PHASE-5-BRIEF.md. Polish only: dashboard, README/docs, packaging, CI, launch kit. No new testing capabilities.
 - **Git protocol for Phase 5: branch `phase-5` is REQUIRED**, and the PR stays unmerged until the reviewer signs off. The USER still runs every git command; Claude stops at each task boundary with a COMMIT POINT block.
-- Phase 5 progress: **T1–T3 done** (`magpie dashboard`; packaging as `magpie-qa` v1.0.0; README overhaul). T4–T7 outstanding.
+- Phase 5 progress: **T1–T4 done** (`magpie dashboard`; packaging as `magpie-qa` v1.0.0; README overhaul; docs/). T5–T7 outstanding.
 - Phase 4 — complete, acceptance run 2026-09-24. Brief + Run Log: PHASE-4-BRIEF.md. PR from `phase-4` awaits review; **do not merge it without the reviewer**.
 - **Git protocol for this phase: the USER ran every git command.** Claude made no commits, branches or pushes; it stopped at each task boundary with a COMMIT POINT block. Commits landed on `main` rather than a `phase-4` branch — worth checking before the PR is opened.
 - Scenario results: **C1, C3, C4, C5, C6, C7, C8 PASS. C2 PARTIAL** — it does skip covered ground and does go to the worst-covered pages, but "fewer LLM calls than C1" did not hold (20 vs 20): a site-wide nav keeps every page under 100%, so queue rule (2) re-queues the whole map each run. The mechanism that makes repeats cheaper (a page at ratio 1 drops off the queue) is unit-tested instead.
