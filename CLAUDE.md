@@ -253,11 +253,15 @@ early, even partially, unless the brief says to leave a seam for them.
 - 2026-10-04 (P5-T2): `files` carries `!dist/**/*.map`. Source maps point at `src/`, which does not ship, so every one of them would resolve to nothing on a user's machine — 114 files and 597 kB unpacked became 60 files and 100 kB.
 - 2026-10-04 (P5-T2): no `postinstall` hook, and a test asserts there never is one. `npx playwright install chromium` is a documented manual step: installing a CLI should not quietly pull 300 MB of browser.
 
+- 2026-10-04 (P5-T3): the architecture diagram is a committed SVG (`docs/architecture.svg`) with an explicit light background, not a theme-aware one. GitHub renders a README SVG inside an `<img>`, where a `prefers-color-scheme` block inside the file is unreliable — a white card that reads correctly on both themes beats a diagram that vanishes on one.
+- 2026-10-04 (P5-T3): the quickstart's expected output is transcribed from `renderTerminalReport` and the harness `narrate` calls, not written by hand. A README snippet that does not match what the tool prints is a small lie, and Hard Rule 9 applies to documentation too.
+- 2026-10-04 (P5-T3): README cut 514 → 278 lines. What left it did not die — the config table, the command table, the memory internals, the regression and explore walkthroughs move to `docs/` in T4, which is why README links to those files before they exist.
+
 ## 11. Current status
 
 - Phase: 5 — **in progress**, started 2026-10-04. Brief + Run Log: PHASE-5-BRIEF.md. Polish only: dashboard, README/docs, packaging, CI, launch kit. No new testing capabilities.
 - **Git protocol for Phase 5: branch `phase-5` is REQUIRED**, and the PR stays unmerged until the reviewer signs off. The USER still runs every git command; Claude stops at each task boundary with a COMMIT POINT block.
-- Phase 5 progress: **T1–T2 done** (`magpie dashboard`; packaging as `magpie-qa` v1.0.0). T3–T7 outstanding.
+- Phase 5 progress: **T1–T3 done** (`magpie dashboard`; packaging as `magpie-qa` v1.0.0; README overhaul). T4–T7 outstanding.
 - Phase 4 — complete, acceptance run 2026-09-24. Brief + Run Log: PHASE-4-BRIEF.md. PR from `phase-4` awaits review; **do not merge it without the reviewer**.
 - **Git protocol for this phase: the USER ran every git command.** Claude made no commits, branches or pushes; it stopped at each task boundary with a COMMIT POINT block. Commits landed on `main` rather than a `phase-4` branch — worth checking before the PR is opened.
 - Scenario results: **C1, C3, C4, C5, C6, C7, C8 PASS. C2 PARTIAL** — it does skip covered ground and does go to the worst-covered pages, but "fewer LLM calls than C1" did not hold (20 vs 20): a site-wide nav keeps every page under 100%, so queue rule (2) re-queues the whole map each run. The mechanism that makes repeats cheaper (a page at ratio 1 drops off the queue) is unit-tested instead.
