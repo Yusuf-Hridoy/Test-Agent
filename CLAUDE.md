@@ -163,7 +163,7 @@ A **project folder** (created by `magpie init`, lives anywhere on the user's dis
 | 2 | Memory: SQLite app map, named flows, flow compilation to deterministic replay | complete (2026-09-23) |
 | 3 | Regression mode: replay compiled flows, memory-based oracles, LLM healing on breakage | complete (2026-09-23) |
 | 4 | Explore mode: coverage matrix, scenario planner, CI integration | complete (2026-09-24); CI integration shipped in Phase 3 |
-| 5 | Polish: dashboard, docs site, public launch | **NEXT** (awaiting brief) |
+| 5 | Polish: dashboard, docs, packaging, CI, launch kit | **in progress** (brief: PHASE-5-BRIEF.md) |
 
 Only the CURRENT phase's brief is authoritative. Do not implement future phases
 early, even partially, unless the brief says to leave a seam for them.
@@ -244,9 +244,17 @@ early, even partially, unless the brief says to leave a seam for them.
 - 2026-09-24 (P4-T5): recorded flows are keyed by the page a flow STARTS from as well as the one it ENDS on. Found by acceptance: a flow recorded as "click Catalogue on the landing page" ends on /catalogue, so keying only on the end page left the landing page ignorant of its own flow and the explorer proposed it twice.
 - 2026-09-24 (P4-T5): the explore seed queue starts from the probe target when one is set. Found by acceptance on saucedemo, where seeding from base_url spent the session's first call generating objectives about logging in again.
 
+- 2026-10-04 (P5-T1): the report's CSS moved to `templates/magpie.css` and both shells carry a `{{STYLE}}` placeholder the renderer fills by inlining that file. Two copies of the design would drift, and a `<link>` is not an option — a report and a dashboard are both single offline files.
+- 2026-10-04 (P5-T1): `EXPLORE_CHARTER` moved from `src/cli/run.ts` to `src/types.ts`. The dashboard reads it back out of the database to label a run `explore`, and the report layer importing from the CLI layer is backwards.
+- 2026-10-04 (P5-T1): a report folder that does not sit under the project renders as its folder name in plain text, not a link. An absolute path in a shared HTML file is a broken link that also leaks the author's home directory.
+- 2026-10-04 (P5-T1): the dashboard shows one card per DEFECT (grouped by the Phase 3 fingerprint, falling back to the title for rows written before fingerprints existed), not one per sighting — and "new" means first sighted by the newest session that recorded any finding at all. A run that found nothing cannot make last night's defects new again.
+
 ## 11. Current status
 
-- Phase: 4 — **complete, acceptance run 2026-09-24**. Brief + Run Log: PHASE-4-BRIEF.md. PR from `phase-4` awaits review; **do not merge it without the reviewer**. Next: await PHASE-5-BRIEF.md. Do NOT start Phase 5.
+- Phase: 5 — **in progress**, started 2026-10-04. Brief + Run Log: PHASE-5-BRIEF.md. Polish only: dashboard, README/docs, packaging, CI, launch kit. No new testing capabilities.
+- **Git protocol for Phase 5: branch `phase-5` is REQUIRED**, and the PR stays unmerged until the reviewer signs off. The USER still runs every git command; Claude stops at each task boundary with a COMMIT POINT block.
+- Phase 5 progress: **T1 done** (`magpie dashboard`). T2–T7 outstanding.
+- Phase 4 — complete, acceptance run 2026-09-24. Brief + Run Log: PHASE-4-BRIEF.md. PR from `phase-4` awaits review; **do not merge it without the reviewer**.
 - **Git protocol for this phase: the USER ran every git command.** Claude made no commits, branches or pushes; it stopped at each task boundary with a COMMIT POINT block. Commits landed on `main` rather than a `phase-4` branch — worth checking before the PR is opened.
 - Scenario results: **C1, C3, C4, C5, C6, C7, C8 PASS. C2 PARTIAL** — it does skip covered ground and does go to the worst-covered pages, but "fewer LLM calls than C1" did not hold (20 vs 20): a site-wide nav keeps every page under 100%, so queue rule (2) re-queues the whole map each run. The mechanism that makes repeats cheaper (a page at ratio 1 drops off the queue) is unit-tested instead.
 - Acceptance found and fixed **3 defects** (flows keyed only by their end page; explore seeding from base_url despite probe_url; the auth check narrating the wrong page) and spent ≈130 Gemini requests. 253 tests green, build clean, every Phase 1–3 test file byte-identical.

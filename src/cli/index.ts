@@ -48,6 +48,16 @@ program
     await runCommand(opts);
   });
 
+program
+  .command("dashboard")
+  .description("Render one offline HTML page showing everything this project remembers")
+  .option("--out <path>", "where to write it (default: <project>/dashboard.html)")
+  .option("--dir <dir>", "project directory (default: current directory)")
+  .action(async (opts: { out?: string; dir?: string }) => {
+    const { dashboardCommand } = await import("./dashboard.js");
+    dashboardCommand(opts);
+  });
+
 const memory = program.command("memory").description("Inspect what Magpie remembers");
 
 memory
