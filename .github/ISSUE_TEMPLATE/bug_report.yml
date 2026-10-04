@@ -1,0 +1,79 @@
+name: Bug report
+description: Something Magpie did wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. `steps.jsonl` is usually the whole story — it is
+        one JSON object per step, appended as it happened.
+
+        **Please scrub what you paste.** Magpie redacts secrets it knows about
+        (keys, cookies, password fields), but your application's own data is
+        yours to protect.
+
+  - type: input
+    id: version
+    attributes:
+      label: Magpie version
+      description: Output of `magpie --version`
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: The command you ran
+      placeholder: 'magpie run --regress all --fail-on-skipped'
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Excerpt from steps.jsonl
+      description: |
+        From `reports/<timestamp>/steps.jsonl` — the last few steps before
+        things went wrong are usually enough. For a replay, the folder is
+        `reports/<timestamp>-replay-<slug>/`.
+
+        Handy: `tail -20 reports/*/steps.jsonl`
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node version, OS, and whether the app under test is public
+      placeholder: |
+        node -v: v20.11.0
+        OS: Ubuntu 24.04
+        App: internal staging, login required
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part?
+      options:
+        - "run --charter (agent loop)"
+        - "run --explore"
+        - "run --regress / flows replay"
+        - "healing"
+        - "memory / dashboard / coverage"
+        - "report or evidence"
+        - "config, init or login"
+        - "not sure"
+    validations:
+      required: false
